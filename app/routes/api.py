@@ -1,4 +1,5 @@
 import json
+import asyncio
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from sqlalchemy.orm import Session
@@ -109,20 +110,35 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
     db.commit()
 
     async def event_stream():
+        queue: asyncio.Queue = asyncio.Queue()
+        pipeline_state = None
+
         async def progress_callback(msg):
-            yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
+            await queue.put(msg)
 
-        # Stream status updates via SSE
-        state = await run_pipeline(project_id, text, meta, config,
-                                   progress_callback=progress_callback)
+        async def run_pipeline_task():
+            nonlocal pipeline_state
+            return await run_pipeline(project_id, text, meta, config,
+                                      progress_callback=progress_callback)
 
-        project.status = "done" if not state.errors else "error"
+        task = asyncio.create_task(run_pipeline_task())
+
+        while not task.done() or not queue.empty():
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=0.5)
+                yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"
+
+        pipeline_state = task.result()
+
+        project.status = "done" if not pipeline_state.errors else "error"
         db.commit()
 
         final_msg = {
             "status": "complete",
-            "errors": state.errors,
-            "yaml_text": state.stage_results.get("assembly").yaml_text if state.stage_results.get("assembly") else "",
+            "errors": pipeline_state.errors,
+            "yaml_text": pipeline_state.stage_results.get("assembly").yaml_text if pipeline_state.stage_results.get("assembly") else "",
         }
         yield f"data: {json.dumps(final_msg, ensure_ascii=False)}\n\n"
 
