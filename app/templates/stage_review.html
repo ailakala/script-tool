@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Stage {{ stage }} — {{ project.title }}{% endblock %}
+{% block content %}
+<h1>{{ project.title }} — Stage {{ stage }} 中间结果</h1>
+<p>查看和编辑中间结果（待实现）</p>
+<a href="/projects/{{ project.id }}">返回工作台</a>
+{% endblock %}

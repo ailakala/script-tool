@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ project.title }} — AI 剧本创作工具{% endblock %}
+{% block content %}
+<h1>{{ project.title }}</h1>
+<div class="workspace">
+    <div class="panel" id="upload-panel">
+        <h2>1. 导入小说</h2>
+        <form hx-encoding="multipart/form-data" hx-post="/api/projects/{{ project.id }}/upload" hx-target="#upload-result">
+            <input type="file" name="file" accept=".txt,.docx,.md">
+            <button type="submit">上传文件</button>
+        </form>
+        <hr>
+        <textarea name="text" placeholder="或直接粘贴小说文本..." rows="10" style="width:100%"></textarea>
+        <button hx-post="/api/projects/{{ project.id }}/paste" hx-include="previous textarea" hx-target="#upload-result">解析文本</button>
+        <div id="upload-result"></div>
+    </div>
+
+    <div class="panel" id="pipeline-panel">
+        <h2>2. 生成剧本</h2>
+        <button id="run-btn" onclick="runPipeline()">一键生成剧本</button>
+        <div id="progress">
+            <div id="stage-0" class="stage">Stage 0: 文本预处理</div>
+            <div id="stage-1" class="stage">Stage 1: 分章节分析</div>
+            <div id="stage-2" class="stage">Stage 2: 跨章节综合</div>
+            <div id="stage-3" class="stage">Stage 3: 剧本结构设计</div>
+            <div id="stage-4" class="stage">Stage 4: 逐场内容生成</div>
+            <div id="stage-5" class="stage">Stage 5: 组装 & 校验</div>
+        </div>
+    </div>
+
+    <div class="panel" id="result-panel">
+        <h2>3. 查看结果</h2>
+        <a href="/projects/{{ project.id }}/script">查看/编辑剧本</a>
+    </div>
+</div>
+
+<script>
+async function runPipeline() {
+    document.getElementById('run-btn').disabled = true;
+    const textarea = document.querySelector('textarea[name="text"]');
+    const text = textarea.value;
+
+    const res = await fetch('/api/projects/{{ project.id }}/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text}),
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, {stream: true});
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+            if (line.startsWith('data: ')) {
+                const msg = JSON.parse(line.slice(6));
+                if (msg.message) {
+                    const el = document.getElementById('stage-' + msg.current_stage);
+                    if (el) {
+                        el.textContent = 'Stage ' + msg.current_stage + ': ' + msg.message;
+                        el.className = 'stage ' + msg.stage_status[msg.current_stage];
+                    }
+                }
+                if (msg.status === 'complete') {
+                    document.getElementById('run-btn').disabled = false;
+                    if (msg.errors && msg.errors.length > 0) {
+                        alert('完成，但有错误:\n' + msg.errors.join('\n'));
+                    }
+                    if (msg.yaml_text) {
+                        const pre = document.createElement('pre');
+                        pre.style.cssText = 'max-height:400px;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:4px;';
+                        pre.textContent = msg.yaml_text;
+                        document.getElementById('result-panel').appendChild(pre);
+                    }
+                }
+            }
+        }
+    }
+}
+</script>
+{% endblock %}

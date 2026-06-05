@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}新建项目 — AI 剧本创作工具{% endblock %}
+{% block content %}
+<h1>新建项目</h1>
+<form hx-post="/api/projects" hx-target="#create-result" hx-swap="innerHTML">
+    <label>项目名称 <input type="text" name="title" required></label>
+    <label>来源小说 <input type="text" name="source_novel"></label>
+    <label>原作者 <input type="text" name="source_author"></label>
+    <label>剧本类型
+        <select name="script_type">
+            <option value="other">通用</option>
+            <option value="film">电影</option>
+            <option value="tv_series">电视剧</option>
+            <option value="stage_play">舞台剧</option>
+            <option value="animation">动画</option>
+        </select>
+    </label>
+    <label>配置 (JSON) <input type="text" name="config_json" value='{}' placeholder='{"target_episodes": 40}'></label>
+    <button type="submit">创建项目</button>
+</form>
+<div id="create-result"></div>
+{% endblock %}
