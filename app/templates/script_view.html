@@ -2,8 +2,29 @@
 {% block title %}剧本预览 — {{ project.title }}{% endblock %}
 {% block content %}
 <h1>{{ project.title }} — 剧本预览</h1>
-<pre id="yaml-viewer" style="background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:4px;overflow:auto;max-height:80vh">
-剧本将在流水线运行完成后在此显示。
-</pre>
+<div id="script-content" hx-get="/api/projects/{{ project.id }}/stage/5" hx-trigger="load">
+    <p>加载中…</p>
+</div>
 <a href="/projects/{{ project.id }}">返回工作台</a>
+
+<script>
+document.getElementById('script-content').addEventListener('htmx:afterSwap', function(e) {
+    const data = JSON.parse(e.detail.xhr.responseText);
+    if (data.status === 'not_run' || !data.data) {
+        e.target.innerHTML = '<p>剧本尚未生成，请先在工作台运行流水线。</p><a href="/projects/{{ project.id }}">前往工作台</a>';
+        return;
+    }
+    const yamlText = data.data.yaml_text || '';
+    if (yamlText) {
+        const pre = document.createElement('pre');
+        pre.id = 'yaml-viewer';
+        pre.style.cssText = 'background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:4px;overflow:auto;max-height:80vh;white-space:pre-wrap;';
+        pre.textContent = yamlText;
+        e.target.innerHTML = '';
+        e.target.appendChild(pre);
+    } else {
+        e.target.innerHTML = '<p>剧本数据为空。请检查流水线是否完成。</p>';
+    }
+});
+</script>
 {% endblock %}

@@ -1,11 +1,16 @@
 import json
 import asyncio
+from dataclasses import asdict
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 from app.db import get_db
-from app.models import Project, PipelineRun
-from app.pipeline.executor import run_pipeline
+from app.models import Project, PipelineRun, StageCache
+from app.pipeline.executor import run_pipeline, compute_input_hash
+from app.pipeline.stage1_chapter_analysis import ChapterAnalysis
+from app.pipeline.stage2_cross_chapter_synthesis import GlobalAnalysis
+from app.pipeline.stage3_script_structure import ScriptStructure, ScenePlan
+from app.pipeline.stage4_scene_generation import GeneratedScene
 
 router = APIRouter(prefix="/api")
 
@@ -118,8 +123,38 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
 
         async def run_pipeline_task():
             nonlocal pipeline_state
+
+            async def cache_get(pid, stage, input_hash):
+                row = db.query(StageCache).filter(
+                    StageCache.project_id == pid,
+                    StageCache.stage == stage,
+                    StageCache.input_hash == input_hash,
+                ).first()
+                if row and row.output_json:
+                    try:
+                        return _deserialize_stage_result(stage, row.output_json)
+                    except Exception:
+                        return None
+                return None
+
+            async def cache_put(pid, stage, input_hash, result):
+                existing = db.query(StageCache).filter(
+                    StageCache.project_id == pid,
+                    StageCache.stage == stage,
+                    StageCache.input_hash == input_hash,
+                ).first()
+                if not existing:
+                    cache = StageCache(
+                        project_id=pid, stage=stage,
+                        input_hash=input_hash,
+                        output_json=_serialize_stage_result(result),
+                    )
+                    db.add(cache)
+                    db.commit()
+
             return await run_pipeline(project_id, text, meta, config,
-                                      progress_callback=progress_callback)
+                                      progress_callback=progress_callback,
+                                      cache_get=cache_get, cache_put=cache_put)
 
         task = asyncio.create_task(run_pipeline_task())
 
@@ -152,6 +187,60 @@ async def download_script(project_id: str, yaml_text: str = "",
         raise HTTPException(404, "项目不存在")
     return PlainTextResponse(yaml_text, media_type="application/x-yaml",
                              headers={"Content-Disposition": f"attachment; filename={project.title}.yaml"})
+
+# ── Cache helpers ────────────────────────────────────────────────────
+
+def _serialize_stage_result(result) -> str:
+    if isinstance(result, list):
+        return json.dumps([asdict(item) for item in result], ensure_ascii=False, default=str)
+    return json.dumps(asdict(result), ensure_ascii=False, default=str)
+
+
+def _deserialize_stage_result(stage: int, data: str):
+    d = json.loads(data)
+    if stage == 1:
+        return [ChapterAnalysis(**item) for item in d]
+    elif stage == 2:
+        return GlobalAnalysis(**d)
+    elif stage == 3:
+        structure = ScriptStructure(**{k: v for k, v in d.items() if k != "scenes"})
+        structure.scenes = [ScenePlan(**s) for s in d.get("scenes", [])]
+        return structure
+    elif stage == 4:
+        return [GeneratedScene(**item) for item in d]
+    elif stage == 5:
+        from app.pipeline.stage5_assembly import AssemblyResult
+        return AssemblyResult(**d)
+    return d
+
+
+@router.get("/projects/{project_id}/stage/{stage}")
+async def get_stage_result(project_id: str, stage: int, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    caches = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == stage,
+    ).order_by(StageCache.created_at.desc()).all()
+
+    if not caches:
+        return {"stage": stage, "status": "not_run", "data": None}
+
+    latest = caches[0]
+    try:
+        data = json.loads(latest.output_json)
+        return {
+            "stage": stage,
+            "status": "cached",
+            "input_hash": latest.input_hash,
+            "created_at": latest.created_at,
+            "data": data,
+        }
+    except (json.JSONDecodeError, TypeError):
+        return {"stage": stage, "status": "error", "data": None}
+
 
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str, db: Session = Depends(get_db)):
