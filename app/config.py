@@ -1,7 +1,9 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 STORAGE_DIR = BASE_DIR / "storage"
 UPLOADS_DIR = STORAGE_DIR / "uploads"
 CACHE_DIR = STORAGE_DIR / "cache"

@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init *)",
+      "Bash(git config *)",
+      "Bash(git *)",
+      "Read(///wsl.localhost/Ubuntu-20.04/home/czc/code/**)",
+      "Bash(python -c \"from app.main import app; print\\(app.title\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(pip install *)",
+      "Bash(rm \"//wsl.localhost/Ubuntu-20.04/home/czc/code/myproject/storage/db.sqlite\")",
+      "Bash(wsl bash *)",
+      "Bash(python -c \"from pathlib import Path; import os; print\\(Path\\(__file__\\).resolve\\(\\) if '__file__' in dir\\(\\) else 'N/A'\\)\")",
+      "Bash(cmd.exe /c \"echo %TEMP%\")",
+      "Bash(SCRIPT_TOOL_DATABASE_URL=sqlite:///C:/Users/15387/AppData/Local/Temp/test_script_tool.db python -c ' *)",
+      "Bash(python -m pytest tests/test_ai_provider.py -v)",
+      "Bash(PYTHONPATH=/home/czc/code/myproject python -m pytest tests/test_stage0.py -v)",
+      "Bash(PYTHONPATH=/home/czc/code/myproject python -m pytest /home/czc/code/myproject/tests/test_stage0.py -v)",
+      "Bash(PYTHONPATH=\"//wsl.localhost/Ubuntu-20.04/home/czc/code/myproject\" python -m pytest \"//wsl.localhost/Ubuntu-20.04/home/czc/code/myproject/tests/test_stage0.py\" -v)",
+      "Bash(python -m pytest tests/test_stage1.py -v)",
+      "Bash(python -m pytest tests/test_stage2.py tests/test_stage3.py -v)",
+      "Bash(python -m pytest tests/test_stage0.py tests/test_stage1.py tests/test_stage2.py tests/test_stage3.py tests/test_ai_provider.py -v)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -c \"from app.main import app; print\\(f'App: {app.title}'\\); print\\(f'Routes: {len\\(app.routes\\)}'\\)\")",
+      "Bash(python -m pytest tests/ -q)"
+    ]
+  }
+}

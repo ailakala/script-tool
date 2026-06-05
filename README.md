@@ -4,62 +4,44 @@
 
 ## 三步上手
 
-### 1. 安装依赖
+### 1. 安装 & 配置
 
 ```bash
-pip install -r requirements.txt
+# 克隆项目
+git clone https://github.com/ailakala/script-tool.git
+cd script-tool
+
+# 复制配置文件
+cp .env.example .env
 ```
 
-### 2. 选择 AI 后端（三选一）
+编辑 `.env` 文件，选择 AI 后端并填入 Key：
 
 **我该选哪个？**
 
-| 方案 | 效果 | 需要什么 | 花费 |
-|------|------|----------|------|
-| **Claude API**（推荐） | 最好，中文理解强 | 申请 API Key | $2-5/次 |
-| **LM Studio**（免费） | 中等，受本地模型影响 | 安装 LM Studio + 下载模型 | 免费 |
-| **OpenAI GPT** | 好 | 申请 API Key | $0.5-1/次 |
+| 方案 | 效果 | 花费 |
+|------|------|------|
+| **Claude API**（推荐） | 最好，中文理解强 | $2-5/次 |
+| **LM Studio** | 中等，看本地模型质量 | 免费 |
+| **OpenAI GPT** | 好 | $0.5-1/次 |
 
-#### 方案 A：Claude API（推荐，效果最好）
+> `.env` 里每种方案都有写好的模板，取消对应注释即可。
 
-```bash
-export SCRIPT_TOOL_ANTHROPIC_API_KEY="sk-ant-..."
-# 其余用默认值，无需额外设置
-```
-
-API Key 在 [console.anthropic.com](https://console.anthropic.com) 申请。
-
-#### 方案 B：LM Studio（免费，本地运行）
-
-1. 下载安装 [LM Studio](https://lmstudio.ai)
-2. 在 LM Studio 里搜索下载一个中文好的模型，比如 **Qwen3-14B** 或 **Qwen2.5-7B-Instruct**
-3. 加载模型后，切到 **Developer** 标签，点 **Start Server**（默认端口 1234）
+### 2. 启动
 
 ```bash
-export SCRIPT_TOOL_AI_PROVIDER=local
-export SCRIPT_TOOL_AI_MODEL=qwen2.5-7b-instruct   # 改成你加载的模型名
-```
-
-> LM Studio 默认在 `localhost:1234` 提供 API，项目已预设此地址。
-
-#### 方案 C：OpenAI GPT
-
-```bash
-export SCRIPT_TOOL_OPENAI_API_KEY="sk-..."
-export SCRIPT_TOOL_AI_PROVIDER=openai
-export SCRIPT_TOOL_AI_MODEL=gpt-4o
-```
-
-### 3. 启动
-
-```bash
-# Windows / WSL 用户先设置数据库路径（重要！）
-export SCRIPT_TOOL_DATABASE_URL="sqlite:///C:/Users/<你的用户名>/script_tool.db"
-
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+bash start.sh
 ```
 
 打开浏览器访问 **http://localhost:8000**。
+
+> `start.sh` 会自动安装依赖、检查配置。首次运行会提示你编辑 `.env`。
+
+### 3. 使用
+
+1. 点 **新建项目** → 填项目名、选剧本类型
+2. 上传 `.txt` / `.docx` 文件，或直接粘贴小说文本（至少要有"第一章""第二章""第三章"）
+3. 点 **一键生成**（全自动），或 **分步生成**（每阶段可审查修改）
 
 ---
 
