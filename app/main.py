@@ -1,13 +1,14 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.config import STORAGE_DIR, UPLOADS_DIR, CACHE_DIR
 
-app = FastAPI(title="AI Script Tool", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    for d in [STORAGE_DIR, UPLOADS_DIR, CACHE_DIR]:
+        d.mkdir(parents=True, exist_ok=True)
+    yield
 
-@app.on_event("startup")
-async def startup():
-    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+app = FastAPI(title="AI Script Tool", version="0.1.0", lifespan=lifespan)
 
 @app.get("/health")
 async def health():
