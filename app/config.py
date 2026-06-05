@@ -7,6 +7,7 @@ load_dotenv(BASE_DIR / ".env")
 STORAGE_DIR = BASE_DIR / "storage"
 UPLOADS_DIR = STORAGE_DIR / "uploads"
 CACHE_DIR = STORAGE_DIR / "cache"
+TEXT_STORE_DIR = STORAGE_DIR / "texts"
 DATABASE_URL = os.getenv("SCRIPT_TOOL_DATABASE_URL", f"sqlite:///{STORAGE_DIR / 'db.sqlite'}")
 
 AI_PROVIDER = os.getenv("SCRIPT_TOOL_AI_PROVIDER", "claude")
