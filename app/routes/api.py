@@ -8,6 +8,7 @@ from app.db import get_db
 from app.models import Project, PipelineRun, StageCache
 from app.pipeline.executor import (run_pipeline, compute_input_hash,
     run_stage_0, run_stage_1, run_stage_2, run_stage_3, run_stage_4, run_stage_5)
+from app.config import TEXT_STORE_DIR
 from app.pipeline.stage0_preprocess import PreprocessResult, Chapter
 from app.pipeline.stage1_chapter_analysis import ChapterAnalysis
 from app.pipeline.stage2_cross_chapter_synthesis import GlobalAnalysis
@@ -15,6 +16,21 @@ from app.pipeline.stage3_script_structure import ScriptStructure, ScenePlan
 from app.pipeline.stage4_scene_generation import GeneratedScene
 
 router = APIRouter(prefix="/api")
+
+
+def _text_path(project_id: str) -> str:
+    return TEXT_STORE_DIR / f"{project_id}.txt"
+
+
+def _save_text(project_id: str, text: str):
+    _text_path(project_id).write_text(text, encoding="utf-8")
+
+
+def _load_text(project_id: str) -> str:
+    p = _text_path(project_id)
+    if p.exists():
+        return p.read_text(encoding="utf-8")
+    return ""
 
 @router.post("/projects")
 async def create_project(
@@ -47,6 +63,7 @@ async def upload_file(project_id: str, file: UploadFile = File(...),
     if filename.endswith(".docx"):
         from app.pipeline.stage0_preprocess import preprocess_docx
         result = preprocess_docx(content)
+        text = ""
     elif filename.endswith(".md"):
         text = content.decode("utf-8", errors="replace")
         from app.pipeline.stage0_preprocess import preprocess_markdown
@@ -55,6 +72,9 @@ async def upload_file(project_id: str, file: UploadFile = File(...),
         text = content.decode("utf-8", errors="replace")
         from app.pipeline.stage0_preprocess import preprocess_text
         result = preprocess_text(text)
+
+    # Save text so pipeline can read it later
+    _save_text(project_id, text)
 
     return {
         "filename": filename,
@@ -79,6 +99,9 @@ async def paste_text(project_id: str, request: Request,
     from app.pipeline.stage0_preprocess import preprocess_text
     result = preprocess_text(text)
 
+    # Save text so pipeline can read it later
+    _save_text(project_id, text)
+
     return {
         "chapters": len(result.chapters),
         "total_chars": result.total_chars,
@@ -95,7 +118,7 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
         raise HTTPException(404, "项目不存在")
 
     body = await request.json()
-    text = body.get("text", "")
+    text = body.get("text", "") or _load_text(project_id)
     if not text:
         raise HTTPException(400, "请先上传或粘贴小说文本")
 
@@ -218,7 +241,7 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
 
     run_id = run.id  # save before detach
     body_data = await request.json()
-    input_text = body_data.get("text", "")
+    input_text = body_data.get("text", "") or _load_text(project_id)
 
     async def event_stream():
         queue: asyncio.Queue = asyncio.Queue()
