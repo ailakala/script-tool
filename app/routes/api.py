@@ -216,6 +216,7 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
     run.paused_at_stage = None
     db.commit()
 
+    run_id = run.id  # save before detach
     body_data = await request.json()
     input_text = body_data.get("text", "")
 
@@ -319,26 +320,37 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
         try:
             result = task.result()
         except Exception as e:
-            run.error_message = str(e)
-            run.stage_status_json = json.dumps({stage: "error"})
-            project.status = "error"
+            run_obj = db.query(PipelineRun).filter(PipelineRun.id == run_id).first()
+            if run_obj:
+                run_obj.error_message = str(e)
+                run_obj.stage_status_json = json.dumps({stage: "error"})
+            project_obj = db.query(Project).filter(Project.id == project_id).first()
+            if project_obj:
+                project_obj.status = "error"
             db.commit()
             yield f"data: {json.dumps({'status': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
             return
 
-        run.current_stage = stage
-        statuses = run.stage_status()
-        statuses[str(stage)] = "done"
-        run.set_stage_status(statuses)
+        run_obj = db.query(PipelineRun).filter(PipelineRun.id == run_id).first()
+        if run_obj:
+            run_obj.current_stage = stage
+            statuses = run_obj.stage_status()
+            statuses[str(stage)] = "done"
+            run_obj.set_stage_status(statuses)
 
-        if stage in (1, 2, 3):
-            run.paused = 1
-            run.paused_at_stage = stage
-            project.status = "paused"
-        else:
-            run.paused = 0
-            run.paused_at_stage = None
-            project.status = "done"
+            if stage in (1, 2, 3):
+                run_obj.paused = 1
+                run_obj.paused_at_stage = stage
+            else:
+                run_obj.paused = 0
+                run_obj.paused_at_stage = None
+
+        project_obj = db.query(Project).filter(Project.id == project_id).first()
+        if project_obj:
+            if stage in (1, 2, 3):
+                project_obj.status = "paused"
+            else:
+                project_obj.status = "done"
 
         db.commit()
 
