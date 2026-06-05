@@ -9,6 +9,13 @@ __pycache__/
 # Runtime data
 storage/
 
+# Claude Code local files
+.claude/
+.mcp.json
+
+# OpenSpec
+openspec/
+
 # Virtual environment
 venv/
 .venv/
