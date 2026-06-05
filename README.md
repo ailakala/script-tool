@@ -1,114 +1,131 @@
 # AI 辅助剧本创作工具
 
-将 3 章以上小说文本自动转换为结构化剧本（YAML 格式），降低改编门槛，提升效率。
+将小说文本（≥3 章）自动转换为结构化 YAML 剧本，支持电影、电视剧、舞台剧、动画。
 
-## 快速开始
+## 三步上手
+
+### 1. 安装依赖
 
 ```bash
-# 安装依赖
 pip install -r requirements.txt
-
-# 设置 AI API Key（至少选一个）
-export SCRIPT_TOOL_ANTHROPIC_API_KEY="sk-ant-..."    # Claude
-export SCRIPT_TOOL_OPENAI_API_KEY="sk-..."           # GPT
-# 或使用本地模型
-export SCRIPT_TOOL_AI_PROVIDER="local"
-export SCRIPT_TOOL_LOCAL_LLM_URL="http://localhost:8000/v1"
-export SCRIPT_TOOL_LOCAL_LLM_API_KEY="your-key"      # 可选
-
-# 启动
-uvicorn app.main:app --reload
 ```
 
-访问 http://localhost:8000
+### 2. 选择 AI 后端（三选一）
+
+**我该选哪个？**
+
+| 方案 | 效果 | 需要什么 | 花费 |
+|------|------|----------|------|
+| **Claude API**（推荐） | 最好，中文理解强 | 申请 API Key | $2-5/次 |
+| **LM Studio**（免费） | 中等，受本地模型影响 | 安装 LM Studio + 下载模型 | 免费 |
+| **OpenAI GPT** | 好 | 申请 API Key | $0.5-1/次 |
+
+#### 方案 A：Claude API（推荐，效果最好）
+
+```bash
+export SCRIPT_TOOL_ANTHROPIC_API_KEY="sk-ant-..."
+# 其余用默认值，无需额外设置
+```
+
+API Key 在 [console.anthropic.com](https://console.anthropic.com) 申请。
+
+#### 方案 B：LM Studio（免费，本地运行）
+
+1. 下载安装 [LM Studio](https://lmstudio.ai)
+2. 在 LM Studio 里搜索下载一个中文好的模型，比如 **Qwen3-14B** 或 **Qwen2.5-7B-Instruct**
+3. 加载模型后，切到 **Developer** 标签，点 **Start Server**（默认端口 1234）
+
+```bash
+export SCRIPT_TOOL_AI_PROVIDER=local
+export SCRIPT_TOOL_AI_MODEL=qwen2.5-7b-instruct   # 改成你加载的模型名
+```
+
+> LM Studio 默认在 `localhost:1234` 提供 API，项目已预设此地址。
+
+#### 方案 C：OpenAI GPT
+
+```bash
+export SCRIPT_TOOL_OPENAI_API_KEY="sk-..."
+export SCRIPT_TOOL_AI_PROVIDER=openai
+export SCRIPT_TOOL_AI_MODEL=gpt-4o
+```
+
+### 3. 启动
+
+```bash
+# Windows / WSL 用户先设置数据库路径（重要！）
+export SCRIPT_TOOL_DATABASE_URL="sqlite:///C:/Users/<你的用户名>/script_tool.db"
+
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+打开浏览器访问 **http://localhost:8000**。
+
+---
 
 ## 使用流程
 
-1. **新建项目** → 填写剧本元信息（标题、来源、剧本类型）
-2. **导入小说** → 上传 .txt/.docx/.md 文件，或直接粘贴文本（需 ≥ 3 章）
-3. **一键生成** → AI 自动完成 6 阶段流水线转化
-4. **查看结果** → 在线预览 YAML 剧本，支持下载
+进入首页后，从左到右三步走：
 
-## 中间结果干预
+### 新建项目 → 导入小说 → 生成剧本
 
-AI 流水线在以下阶段支持暂停和人工介入：
+1. 点 **新建项目**，填项目名、选择剧本类型（电影/电视剧/动画等）
+2. 在项目工作台上传 `.txt` / `.docx` / `.md` 文件，或直接粘贴小说文本（至少要有 3 章，比如"第一章""第二章""第三章"）
+3. 点 **一键生成**（6 个阶段自动跑完），或点 **分步生成**（每个阶段完成后暂停，可以审查 AI 的中间结果再继续）
 
-| Stage | 内容 | 可干预 |
-|-------|------|--------|
-| 0 | 文本预处理（章节拆分） | — |
-| 1 | 分章节分析（人物、地点、情节） | 审核 AI 识别结果 |
-| 2 | 跨章节综合（去重、关系图） | 调整人物关系和情节线 |
-| 3 | 剧本结构设计（场景列表） | 调整场景划分和结构 |
-| 4 | 逐场内容生成 | — |
-| 5 | YAML 组装 & 校验 | — |
+### 分步生成模式
 
-## 剧本 YAML Schema
+分步模式下，Stage 1/2/3 完成后会自动暂停，展示 AI 识别的人物、情节、场景结构：
 
-输出剧本遵循 [YAML Schema 规范](docs/script-yaml-schema.md)，包含：
-- `meta` — 元数据
-- `config` — 生成配置
-- `characters` — 人物表（ID 体系、关系图）
-- `scenes` — 场景列表（扁平结构、结构化 content 数组）
-- `extensions` — 类型特定扩展（TV 分集大纲、电影节拍表等）
+- **Stage 1** — 每章识别出哪些人物、地点、情节事件 → 检查有没有漏人或认错角色
+- **Stage 2** — 跨章节合并去重，整理人物关系图 → 调整关系、补充遗漏
+- **Stage 3** — 设计剧本场景列表 → 调整场景划分，增删合并场景
 
-## 项目结构
+审查满意后点 **继续** 进入下一阶段。也可以点 **跳过审查，直接完成** 让剩余阶段自动跑完。
 
-```
-app/
-├── main.py              # FastAPI 入口
-├── config.py            # 配置（环境变量驱动）
-├── db.py                # 数据库连接
-├── models.py            # ORM 模型（Project, PipelineRun, StageCache）
-├── routes/
-│   ├── pages.py         # SSR 页面路由
-│   └── api.py           # REST API + SSE 流式
-├── pipeline/
-│   ├── executor.py      # 流水线调度器
-│   ├── stage0_preprocess.py    # 文本预处理
-│   ├── stage1_chapter_analysis.py  # 分章节分析
-│   ├── stage2_cross_chapter_synthesis.py  # 跨章节综合
-│   ├── stage3_script_structure.py   # 剧本结构设计
-│   ├── stage4_scene_generation.py   # 逐场内容生成
-│   └── stage5_assembly.py          # YAML 组装校验
-├── ai/
-│   ├── interface.py     # AI Provider 抽象接口
-│   ├── claude.py        # Claude API
-│   ├── openai.py        # OpenAI API
-│   ├── local.py         # 本地模型（OpenAI 兼容）
-│   └── factory.py       # 工厂函数
-└── templates/           # Jinja2 模板
-```
+### 查看结果
 
-## 技术栈
+流水线跑完后，结果面板会出现生成的 YAML 剧本。可以：
+- 点 **查看/编辑剧本** 在线预览
+- 点 **下载 YAML** 保存到本地
 
-- **Web**: FastAPI + Jinja2 SSR + HTMX
-- **数据库**: SQLite (SQLAlchemy ORM)
-- **AI**: Claude / GPT / 本地模型（通过统一接口切换）
-- **测试**: pytest (35 tests)
+---
 
-## 测试
+## 配置参考
 
-```bash
-pytest tests/ -v        # 运行全部 35 个测试
-```
+所有配置都通过环境变量，不设就用默认值：
 
-## 配置
-
-所有配置通过环境变量：
-
-| 变量 | 默认 | 说明 |
-|------|------|------|
-| `SCRIPT_TOOL_AI_PROVIDER` | `claude` | AI 后端（claude/openai/local） |
-| `SCRIPT_TOOL_AI_MODEL` | `claude-sonnet-4-6` | 模型名称 |
+| 变量 | 默认值 | 作用 |
+|------|--------|------|
+| `SCRIPT_TOOL_AI_PROVIDER` | `claude` | 选哪个 AI：`claude` / `openai` / `local` |
+| `SCRIPT_TOOL_AI_MODEL` | `claude-sonnet-4-6` | 模型名（用 local 时改成 LM Studio 里加载的模型） |
 | `SCRIPT_TOOL_ANTHROPIC_API_KEY` | — | Claude API Key |
 | `SCRIPT_TOOL_OPENAI_API_KEY` | — | OpenAI API Key |
-| `SCRIPT_TOOL_LOCAL_LLM_URL` | `http://localhost:8000/v1` | 本地模型地址 |
-| `SCRIPT_TOOL_LOCAL_LLM_API_KEY` | `not-needed` | 本地模型 API Key |
-| `SCRIPT_TOOL_DATABASE_URL` | `sqlite:///storage/db.sqlite` | 数据库连接 |
+| `SCRIPT_TOOL_LOCAL_LLM_URL` | `http://localhost:1234/v1` | 本地模型 API 地址 |
+| `SCRIPT_TOOL_LOCAL_LLM_API_KEY` | `not-needed` | 本地模型 API Key（LM Studio 不验证） |
+| `SCRIPT_TOOL_DATABASE_URL` | `sqlite:///storage/db.sqlite` | 数据库位置 |
 
-## 限制
+---
 
-- 一次性处理上限: 20 章、50 万字
-- 上传文件: 10MB
-- 在线粘贴: 50 万字符
-- 单次转换 LLM 成本: ~$2-5 (Claude) / ~$0.5-1 (GPT-4o)
+## 常见问题
+
+**Q: WSL 下启动后数据库报错 "database is locked"？**
+A: 设置数据库路径到 Windows 本机目录：
+```bash
+export SCRIPT_TOOL_DATABASE_URL="sqlite:///C:/Users/<你的用户名>/script_tool.db"
+```
+
+**Q: 用 LM Studio 时提示连接失败？**
+A: 检查三个点：
+1. LM Studio 的 Server 是否已启动（Developer 标签 → Start Server）
+2. 端口默认 1234，不要改
+3. 模型名要和 LM Studio 里加载的一致
+
+**Q: 一键生成跑到一半报错了？**
+A: 切到分步模式重试——分步模式每步都有缓存，之前已完成的不需要重新跑。
+
+**Q: 分步模式下 Stage 1/2/3 显示 "请先运行 Stage X"？**
+A: 按顺序来，先跑 Stage 0，再跑 Stage 1，以此类推。
+
+**Q: 一次能处理多长的小说？**
+A: 建议 20 章以内、50 万字以内。超长的建议分成多个项目分批处理。

@@ -11,7 +11,7 @@ AI_PROVIDER = os.getenv("SCRIPT_TOOL_AI_PROVIDER", "claude")
 AI_MODEL = os.getenv("SCRIPT_TOOL_AI_MODEL", "claude-sonnet-4-6")
 ANTHROPIC_API_KEY = os.getenv("SCRIPT_TOOL_ANTHROPIC_API_KEY")
 OPENAI_API_KEY = os.getenv("SCRIPT_TOOL_OPENAI_API_KEY")
-LOCAL_LLM_URL = os.getenv("SCRIPT_TOOL_LOCAL_LLM_URL", "http://localhost:8000/v1")
+LOCAL_LLM_URL = os.getenv("SCRIPT_TOOL_LOCAL_LLM_URL", "http://localhost:1234/v1")
 LOCAL_LLM_API_KEY = os.getenv("SCRIPT_TOOL_LOCAL_LLM_API_KEY", "not-needed")
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
