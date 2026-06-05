@@ -1,3 +1,4 @@
+from typing import Optional
 from app.ai.interface import AIProvider
 from app.ai.claude import ClaudeProvider
 from app.ai.openai import OpenAIProvider
@@ -5,7 +6,7 @@ from app.ai.local import LocalLLMProvider
 from app.config import AI_PROVIDER, AI_MODEL
 
 
-def create_ai_provider(provider: str = "", model: str = "") -> AIProvider:
+def create_ai_provider(provider: Optional[str] = None, model: Optional[str] = None) -> AIProvider:
     provider = provider or AI_PROVIDER
     model = model or AI_MODEL
     if provider == "claude":

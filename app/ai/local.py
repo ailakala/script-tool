@@ -3,13 +3,13 @@ from typing import AsyncIterator
 from openai import AsyncOpenAI
 
 from app.ai.interface import AIProvider
-from app.config import LOCAL_LLM_URL
+from app.config import LOCAL_LLM_URL, LOCAL_LLM_API_KEY
 
 
 class LocalLLMProvider(AIProvider):
     def __init__(self, model: str = "local-model"):
         self._model = model
-        self._client = AsyncOpenAI(base_url=LOCAL_LLM_URL, api_key="not-needed")
+        self._client = AsyncOpenAI(base_url=LOCAL_LLM_URL, api_key=LOCAL_LLM_API_KEY)
 
     def model_name(self) -> str:
         return self._model

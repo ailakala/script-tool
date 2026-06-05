@@ -21,7 +21,9 @@ class ClaudeProvider(AIProvider):
         if system:
             kwargs["system"] = system
         response = await self._client.messages.create(**kwargs)
-        return response.content[0].text
+        if response.content and response.content[0].type == "text":
+            return response.content[0].text
+        return ""
 
     async def generate_stream(self, prompt: str, system: str = "") -> AsyncIterator[str]:
         messages = [{"role": "user", "content": prompt}]
