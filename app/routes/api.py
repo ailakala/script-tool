@@ -2,7 +2,7 @@ import json
 import asyncio
 from dataclasses import asdict
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse, PlainTextResponse
+from fastapi.responses import StreamingResponse, PlainTextResponse, HTMLResponse
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import Project, PipelineRun, StageCache
@@ -34,6 +34,7 @@ def _load_text(project_id: str) -> str:
 
 @router.post("/projects")
 async def create_project(
+    request: Request,
     title: str = Form(...),
     source_novel: str = Form(""),
     source_author: str = Form(""),
@@ -48,6 +49,32 @@ async def create_project(
     db.add(project)
     db.commit()
     db.refresh(project)
+
+    # HTMX request → return HTML modal fragment
+    if request.headers.get("HX-Request"):
+        return HTMLResponse(content=f"""<div id="create-modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;animation:fadeIn 0.2s ease">
+<div id="create-modal" style="background:#fff;border-radius:12px;padding:2em;text-align:center;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,0.3);animation:scaleIn 0.3s ease">
+<img src="https://media.tenor.com/WQ3LQ6sUkQcAAAAi/peach-goma-pc.gif" alt="celebrate" style="width:120px;height:120px;border-radius:12px;margin-bottom:0.5em">
+<h2 style="margin:0.5em 0;font-size:1.2em">项目创建成功！🎉</h2>
+<p style="color:#6b7280;margin-bottom:1.5em">「{title}」已就绪</p>
+<div style="display:flex;gap:0.5em;justify-content:center">
+<a href="/projects/{project.id}" style="display:inline-block;padding:0.5em 1.25em;background:var(--accent, #2563eb);color:#fff;border-radius:6px;text-decoration:none;font-size:0.95em">前往项目工作台</a>
+<button onclick="document.getElementById('create-modal-overlay').remove()" style="padding:0.5em 1.25em;background:#e5e7eb;color:#1a1a1a;border:none;border-radius:6px;cursor:pointer;font-size:0.95em">✕ 关闭</button>
+</div>
+</div>
+</div>
+<script>
+setTimeout(function() {{
+    var overlay = document.getElementById('create-modal-overlay');
+    if (overlay) {{
+        overlay.style.transition = 'opacity 0.3s';
+        overlay.style.opacity = '0';
+        setTimeout(function() {{ if (overlay.parentNode) overlay.remove(); }}, 300);
+    }}
+}}, 3000);
+</script>
+""")
+
     return {"id": project.id, "title": project.title}
 
 @router.post("/projects/{project_id}/upload")
@@ -186,6 +213,7 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
         while not task.done() or not queue.empty():
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=0.5)
+                _inject_percent(msg)
                 yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
             except asyncio.TimeoutError:
                 yield ": keepalive\n\n"
@@ -336,6 +364,7 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
         while not task.done() or not queue.empty():
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=0.5)
+                _inject_percent(msg)
                 yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
             except asyncio.TimeoutError:
                 yield ": keepalive\n\n"
@@ -420,13 +449,61 @@ def _get_latest_cached(db: Session, project_id: str, stage: int):
 
 
 @router.get("/projects/{project_id}/script.yaml")
-async def download_script(project_id: str, yaml_text: str = "",
-                          db: Session = Depends(get_db)):
+async def download_script(project_id: str, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(404, "项目不存在")
+
+    # Read yaml_text from StageCache (stage 5)
+    cache_row = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == 5,
+    ).order_by(StageCache.created_at.desc()).first()
+
+    yaml_text = ""
+    if cache_row and cache_row.output_json:
+        try:
+            data = json.loads(cache_row.output_json)
+            yaml_text = data.get("yaml_text", "")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if not yaml_text:
+        raise HTTPException(404, "剧本 YAML 尚未生成，请先运行流水线")
+
     return PlainTextResponse(yaml_text, media_type="application/x-yaml",
                              headers={"Content-Disposition": f"attachment; filename={project.title}.yaml"})
+
+
+@router.put("/projects/{project_id}/stage/5")
+async def save_edited_script(project_id: str, request: Request,
+                              db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    body = await request.json()
+    yaml_text = body.get("yaml_text", "")
+
+    cache_row = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == 5,
+    ).order_by(StageCache.created_at.desc()).first()
+
+    if not cache_row:
+        raise HTTPException(404, "剧本尚未生成，无法保存")
+
+    # Update the yaml_text inside the cached output_json
+    try:
+        data = json.loads(cache_row.output_json)
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    data["yaml_text"] = yaml_text
+    cache_row.output_json = json.dumps(data, ensure_ascii=False)
+    db.commit()
+
+    return {"status": "saved"}
+
 
 # ── Cache helpers ────────────────────────────────────────────────────
 
@@ -494,3 +571,19 @@ async def delete_project(project_id: str, db: Session = Depends(get_db)):
     db.delete(project)
     db.commit()
     return {"deleted": project_id}
+
+
+def _inject_percent(msg: dict):
+    """Add percent field based on completed stages."""
+    stage_status = msg.get("stage_status", {})
+    if stage_status:
+        done = sum(1 for v in stage_status.values() if v == "done")
+        current = msg.get("current_stage", -1)
+        if done == 0 and current >= 0:
+            # Step-by-step mode: only current stage in status, assume previous stages done
+            msg["percent"] = min(current * 100 // 6, 100)
+        else:
+            msg["percent"] = min(done * 100 // 6, 100)
+    elif msg.get("status") == "complete" and "stage" in msg:
+        # Single-stage completion message
+        msg["percent"] = (msg["stage"] + 1) * 100 // 6
