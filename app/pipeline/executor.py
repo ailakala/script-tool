@@ -33,6 +33,131 @@ class PipelineState:
         self.current_stage = stage
 
 
+# ── Independent stage functions ──────────────────────────────────────
+
+async def run_stage_0(project_id: str, text: str,
+                      notify=None,
+                      cache_get: Optional[Callable] = None,
+                      cache_put: Optional[Callable] = None) -> PreprocessResult:
+    s0_hash = compute_input_hash(stage=0, text=text)
+    if cache_get:
+        cached = await cache_get(project_id, 0, s0_hash)
+        if cached is not None:
+            return cached
+
+    if notify:
+        await notify("正在解析文本...")
+    result = preprocess_text(text)
+    if not result.is_valid():
+        raise ValueError(f"文本章节不足（需要至少3章，检测到{len(result.chapters)}章）")
+
+    if cache_put:
+        await cache_put(project_id, 0, s0_hash, result)
+    return result
+
+
+async def run_stage_1(project_id: str, text: str, chapters: list,
+                      provider: AIProvider = None,
+                      notify=None,
+                      cache_get: Optional[Callable] = None,
+                      cache_put: Optional[Callable] = None) -> list:
+    if provider is None:
+        provider = create_ai_provider()
+
+    s1_hash = compute_input_hash(stage=1, text=text)
+
+    async def _run():
+        if notify:
+            await notify(f"正在分析 {len(chapters)} 个章节...")
+        return await analyze_chapters_parallel(chapters, provider)
+
+    return await _cache_or_run(cache_get, cache_put, project_id, 1, s1_hash, _run)
+
+
+async def run_stage_2(project_id: str, chapter_analyses: list,
+                      provider: AIProvider = None,
+                      notify=None,
+                      cache_get: Optional[Callable] = None,
+                      cache_put: Optional[Callable] = None) -> GlobalAnalysis:
+    if provider is None:
+        provider = create_ai_provider()
+
+    s2_hash = compute_input_hash(stage=2, analyses=_dataclass_list_hash(chapter_analyses))
+
+    async def _run():
+        if notify:
+            await notify("正在综合人物和情节...")
+        return await synthesize(chapter_analyses, provider)
+
+    return await _cache_or_run(cache_get, cache_put, project_id, 2, s2_hash, _run)
+
+
+async def run_stage_3(project_id: str, global_analysis: GlobalAnalysis,
+                      config: dict,
+                      provider: AIProvider = None,
+                      notify=None,
+                      cache_get: Optional[Callable] = None,
+                      cache_put: Optional[Callable] = None) -> ScriptStructure:
+    if provider is None:
+        provider = create_ai_provider()
+
+    s3_hash = compute_input_hash(stage=3,
+                                 analysis_hash=_dataclass_list_hash([global_analysis]),
+                                 config=json.dumps(config, sort_keys=True))
+
+    async def _run():
+        if notify:
+            await notify("正在设计剧本结构...")
+        return await design_structure(global_analysis, config, provider)
+
+    return await _cache_or_run(cache_get, cache_put, project_id, 3, s3_hash, _run)
+
+
+async def run_stage_4(project_id: str, structure: ScriptStructure,
+                      characters: list, chapter_texts: dict,
+                      provider: AIProvider = None,
+                      notify=None,
+                      cache_get: Optional[Callable] = None,
+                      cache_put: Optional[Callable] = None) -> list:
+    if provider is None:
+        provider = create_ai_provider()
+
+    s4_hash = compute_input_hash(stage=4,
+                                 structure_hash=_dataclass_list_hash(structure.scenes),
+                                 char_hash=_dict_list_hash(characters))
+
+    async def _run():
+        if notify:
+            await notify(f"正在生成 {len(structure.scenes)} 场内容...")
+        return await generate_scenes_parallel(
+            structure.scenes, characters, chapter_texts, provider
+        )
+
+    return await _cache_or_run(cache_get, cache_put, project_id, 4, s4_hash, _run)
+
+
+async def run_stage_5(project_id: str, meta: dict, config: dict,
+                      global_analysis: GlobalAnalysis,
+                      structure: ScriptStructure, scenes: list,
+                      notify=None,
+                      cache_get: Optional[Callable] = None,
+                      cache_put: Optional[Callable] = None) -> AssemblyResult:
+    s5_hash = compute_input_hash(stage=5,
+                                 meta=json.dumps(meta, sort_keys=True),
+                                 structure_hash=_dataclass_list_hash(structure.scenes),
+                                 scenes_hash=_dataclass_list_hash(scenes))
+
+    async def _run():
+        if notify:
+            await notify("正在组装和校验 YAML...")
+        return assemble(meta, config, global_analysis, structure, scenes)
+
+    result = await _cache_or_run(cache_get, cache_put, project_id, 5, s5_hash, _run)
+    return result
+
+
+# ── All-in-one pipeline wrapper ──────────────────────────────────────
+
 async def run_pipeline(project_id: str, text: str, meta: dict, config: dict,
                        provider: AIProvider = None,
                        progress_callback=None,
@@ -42,81 +167,59 @@ async def run_pipeline(project_id: str, text: str, meta: dict, config: dict,
         provider = create_ai_provider()
 
     state = PipelineState(project_id=project_id, progress_callback=progress_callback)
-    chapter_texts = {}
+
+    async def notify(msg):
+        await _notify(state, msg)
 
     try:
-        # Stage 0 — 纯工程，不做缓存
+        # Stage 0
         state.set_stage(0, StageStatus.RUNNING)
-        await _notify(state, "正在解析文本...")
-        preprocess = preprocess_text(text)
-        if not preprocess.is_valid():
-            raise ValueError(f"文本章节不足（需要至少3章，检测到{len(preprocess.chapters)}章）")
+        preprocess = await run_stage_0(project_id, text, notify, cache_get, cache_put)
+        chapter_texts = {ch.index: ch.content for ch in preprocess.chapters}
         state.stage_results["preprocess"] = preprocess
         state.stage_results["meta"] = meta
         state.stage_results["config"] = config
-        for ch in preprocess.chapters:
-            chapter_texts[ch.index] = ch.content
         state.set_stage(0, StageStatus.DONE)
 
-        # Stage 1 — 分章节分析（按文本内容缓存）
+        # Stage 1
         state.set_stage(1, StageStatus.RUNNING)
-        await _notify(state, f"正在分析 {len(preprocess.chapters)} 个章节...")
-        s1_hash = compute_input_hash(stage=1, text=text)
-        chapter_analyses = await _cache_or_run(
-            cache_get, cache_put, project_id, 1, s1_hash,
-            lambda: analyze_chapters_parallel(preprocess.chapters, provider)
-        )
+        chapter_analyses = await run_stage_1(
+            project_id, text, preprocess.chapters, provider, notify, cache_get, cache_put)
         state.stage_results["chapter_analyses"] = chapter_analyses
         state.set_stage(1, StageStatus.DONE)
 
-        # Stage 2 — 跨章节综合（按章节分析结果缓存）
+        # Stage 2
         state.set_stage(2, StageStatus.RUNNING)
-        await _notify(state, "正在综合人物和情节...")
-        s2_hash = compute_input_hash(stage=2, analyses=_dataclass_list_hash(chapter_analyses))
-        global_analysis = await _cache_or_run(
-            cache_get, cache_put, project_id, 2, s2_hash,
-            lambda: synthesize(chapter_analyses, provider)
-        )
+        global_analysis = await run_stage_2(
+            project_id, chapter_analyses, provider, notify, cache_get, cache_put)
         state.stage_results["global_analysis"] = global_analysis
         state.set_stage(2, StageStatus.DONE)
 
-        # Stage 3 — 剧本结构设计（按综合结果 + config 缓存）
+        # Stage 3
         state.set_stage(3, StageStatus.RUNNING)
-        await _notify(state, "正在设计剧本结构...")
-        s3_hash = compute_input_hash(stage=3, analysis_hash=s2_hash, config=json.dumps(config, sort_keys=True))
-        structure = await _cache_or_run(
-            cache_get, cache_put, project_id, 3, s3_hash,
-            lambda: design_structure(global_analysis, config, provider)
-        )
+        structure = await run_stage_3(
+            project_id, global_analysis, config, provider, notify, cache_get, cache_put)
         state.stage_results["structure"] = structure
         state.set_stage(3, StageStatus.DONE)
 
-        # Stage 4 — 逐场内容生成（按 structure + characters 缓存）
+        # Stage 4
         state.set_stage(4, StageStatus.RUNNING)
-        await _notify(state, f"正在生成 {len(structure.scenes)} 场内容...")
-        s4_hash = compute_input_hash(stage=4, structure_hash=s3_hash,
-                                     char_hash=_dict_list_hash(global_analysis.characters))
-        scenes = await _cache_or_run(
-            cache_get, cache_put, project_id, 4, s4_hash,
-            lambda: generate_scenes_parallel(
-                structure.scenes, global_analysis.characters, chapter_texts, provider
-            )
-        )
+        scenes = await run_stage_4(
+            project_id, structure, global_analysis.characters, chapter_texts,
+            provider, notify, cache_get, cache_put)
         state.stage_results["scenes"] = scenes
         state.set_stage(4, StageStatus.DONE)
 
-        # Stage 5 — 组装校验（按前序结果哈希缓存）
+        # Stage 5
         state.set_stage(5, StageStatus.RUNNING)
-        await _notify(state, "正在组装和校验 YAML...")
-        s5_hash = compute_input_hash(stage=5, meta=json.dumps(meta, sort_keys=True),
-                                     s4_hash=s4_hash)
-        result = await _cache_or_run(
-            cache_get, cache_put, project_id, 5, s5_hash,
-            lambda: _sync_assemble(meta, config, global_analysis, structure, scenes, state)
-        )
+        result = await run_stage_5(
+            project_id, meta, config, global_analysis, structure, scenes,
+            notify, cache_get, cache_put)
         state.stage_results["assembly"] = result
         if not result.is_valid:
-            state.errors.extend(result.warnings)
+            for w in result.warnings:
+                if w.startswith("ERROR"):
+                    state.errors.append(w)
         state.set_stage(5, StageStatus.DONE)
 
     except Exception as e:
@@ -126,19 +229,10 @@ async def run_pipeline(project_id: str, text: str, meta: dict, config: dict,
     return state
 
 
-async def _sync_assemble(meta, config, global_analysis, structure, scenes, state):
-    """Async wrapper for sync assemble to store validation errors."""
-    result = assemble(meta, config, global_analysis, structure, scenes)
-    if not result.is_valid:
-        for w in result.warnings:
-            if w.startswith("ERROR"):
-                state.errors.append(w)
-    return result
-
+# ── Helpers ──────────────────────────────────────────────────────────
 
 async def _cache_or_run(cache_get, cache_put, project_id: str, stage: int,
                         input_hash: str, fn):
-    """如果缓存命中则直接返回，否则执行 fn 并写入缓存。"""
     if cache_get:
         cached = await cache_get(project_id, stage, input_hash)
         if cached is not None:
@@ -150,13 +244,11 @@ async def _cache_or_run(cache_get, cache_put, project_id: str, stage: int,
 
 
 def _dataclass_list_hash(items) -> str:
-    """为 dataclass 列表生成稳定的哈希字符串。"""
     data = json.dumps([asdict(item) for item in items], sort_keys=True, default=str)
     return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
 def _dict_list_hash(items: list) -> str:
-    """为 dict 列表生成稳定的哈希字符串。"""
     data = json.dumps(items, sort_keys=True, default=str)
     return hashlib.sha256(data.encode()).hexdigest()[:16]
 

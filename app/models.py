@@ -45,6 +45,8 @@ class PipelineRun(Base):
     error_message = Column(Text, default="")
     started_at = Column(String, default="")
     completed_at = Column(String, default="")
+    paused = Column(Integer, default=0)
+    paused_at_stage = Column(Integer, nullable=True)
 
     project = relationship("Project", back_populates="pipeline_runs")
 

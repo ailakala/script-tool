@@ -17,7 +17,10 @@
 
     <div class="panel" id="pipeline-panel">
         <h2>2. 生成剧本</h2>
-        <button id="run-btn" onclick="runPipeline()">一键生成剧本</button>
+        <div style="display:flex;gap:0.5em;margin-bottom:1em">
+            <button id="run-btn" onclick="runPipeline()">一键生成</button>
+            <button id="step-btn" onclick="runStepByStep()">分步生成</button>
+        </div>
         <div id="progress">
             <div id="stage-0" class="stage">Stage 0: 文本预处理</div>
             <div id="stage-1" class="stage">Stage 1: 分章节分析</div>
@@ -25,6 +28,15 @@
             <div id="stage-3" class="stage">Stage 3: 剧本结构设计</div>
             <div id="stage-4" class="stage">Stage 4: 逐场内容生成</div>
             <div id="stage-5" class="stage">Stage 5: 组装 & 校验</div>
+        </div>
+    </div>
+
+    <div class="panel" id="review-panel" style="display:none">
+        <h2>审查中间结果</h2>
+        <div id="review-content"></div>
+        <div style="margin-top:1em">
+            <button id="continue-btn" onclick="continuePipeline()" style="display:none">继续下一阶段</button>
+            <button id="skip-review-btn" onclick="skipToEnd()" style="display:none">跳过审查，直接完成</button>
         </div>
     </div>
 
@@ -36,53 +48,156 @@
 </div>
 
 <script>
-async function runPipeline() {
-    document.getElementById('run-btn').disabled = true;
-    const textarea = document.querySelector('textarea[name="text"]');
-    const text = textarea.value;
+let _nextStage = 1;
+let _stepMode = false;
 
-    const res = await fetch('/api/projects/{{ project.id }}/run', {
+function getText() {
+    const textarea = document.querySelector('textarea[name="text"]');
+    return textarea ? textarea.value : '';
+}
+
+function setButtons(disabled) {
+    document.getElementById('run-btn').disabled = disabled;
+    document.getElementById('step-btn').disabled = disabled;
+}
+
+function updateStage(stage, status, message) {
+    const el = document.getElementById('stage-' + stage);
+    if (el) {
+        if (message) el.textContent = 'Stage ' + stage + ': ' + message;
+        el.className = 'stage ' + status;
+    }
+}
+
+async function streamSSE(url, onMessage) {
+    const res = await fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({text}),
+        body: JSON.stringify({text: getText()}),
     });
-
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-
     while (true) {
         const {done, value} = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, {stream: true});
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
-
         for (const line of lines) {
             if (line.startsWith('data: ')) {
                 const msg = JSON.parse(line.slice(6));
-                if (msg.message) {
-                    const el = document.getElementById('stage-' + msg.current_stage);
-                    if (el) {
-                        el.textContent = 'Stage ' + msg.current_stage + ': ' + msg.message;
-                        el.className = 'stage ' + msg.stage_status[msg.current_stage];
-                    }
-                }
-                if (msg.status === 'complete') {
-                    document.getElementById('run-btn').disabled = false;
-                    if (msg.errors && msg.errors.length > 0) {
-                        alert('完成，但有错误:\n' + msg.errors.join('\n'));
-                    }
-                    if (msg.yaml_text) {
-                        const pre = document.createElement('pre');
-                        pre.style.cssText = 'max-height:400px;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:4px;';
-                        pre.textContent = msg.yaml_text;
-                        document.getElementById('result-panel').appendChild(pre);
-                    }
-                }
+                if (onMessage(msg) === false) return false;
             }
         }
     }
+    return true;
+}
+
+// ── One-click mode ──────────────────────────────────────────────────
+
+async function runPipeline() {
+    setButtons(true);
+    document.getElementById('review-panel').style.display = 'none';
+
+    const ok = await streamSSE('/api/projects/{{ project.id }}/run', function(msg) {
+        if (msg.message && msg.current_stage !== undefined) {
+            updateStage(msg.current_stage, msg.stage_status[msg.current_stage], msg.message);
+        }
+        if (msg.status === 'complete') {
+            if (msg.errors && msg.errors.length > 0) {
+                alert('完成，但有错误:\n' + msg.errors.join('\n'));
+            }
+            if (msg.yaml_text) {
+                showYAML(msg.yaml_text);
+            }
+        }
+    });
+
+    setButtons(false);
+}
+
+// ── Step-by-step mode ───────────────────────────────────────────────
+
+async function runStepByStep() {
+    setButtons(true);
+    _stepMode = true;
+    _nextStage = 0;
+    document.getElementById('review-panel').style.display = 'none';
+    await runNextStage();
+}
+
+async function continuePipeline() {
+    document.getElementById('continue-btn').style.display = 'none';
+    document.getElementById('skip-review-btn').style.display = 'none';
+    await runNextStage();
+}
+
+async function skipToEnd() {
+    _stepMode = false;
+    document.getElementById('continue-btn').style.display = 'none';
+    document.getElementById('skip-review-btn').style.display = 'none';
+    document.getElementById('review-panel').style.display = 'none';
+    // Use one-shot mode — cached stages will be skipped
+    setButtons(false);
+    runPipeline();
+}
+
+async function runNextStage() {
+    const stage = _nextStage;
+    updateStage(stage, 'running', '');
+    const reviewPanel = document.getElementById('review-panel');
+    reviewPanel.style.display = 'none';
+
+    const ok = await streamSSE('/api/projects/{{ project.id }}/run-stage/' + stage, function(msg) {
+        if (msg.message) {
+            updateStage(stage, 'running', msg.message);
+        }
+        if (msg.status === 'complete') {
+            updateStage(stage, 'done', '');
+            _nextStage = stage + 1;
+
+            if (_stepMode && (stage === 1 || stage === 2 || stage === 3)) {
+                // Pause for review
+                reviewPanel.style.display = 'block';
+                document.getElementById('continue-btn').style.display = 'inline-block';
+                document.getElementById('skip-review-btn').style.display = 'inline-block';
+                document.getElementById('review-content').innerHTML =
+                    '<div hx-get="/api/projects/{{ project.id }}/stage/' + stage + '" hx-trigger="load">加载中间结果…</div>';
+            } else if (_nextStage <= 5) {
+                // Auto-continue
+                runNextStage();
+            } else {
+                // Done
+                setButtons(false);
+                reviewPanel.style.display = 'none';
+                // Load YAML into result panel
+                fetch('/api/projects/{{ project.id }}/stage/5')
+                    .then(r => r.json())
+                    .then(d => { if (d.data && d.data.yaml_text) showYAML(d.data.yaml_text); });
+            }
+        }
+        if (msg.status === 'error') {
+            updateStage(stage, 'error', msg.message);
+            setButtons(false);
+            return false;
+        }
+    });
+
+    if (!ok) {
+        setButtons(false);
+    }
+}
+
+function showYAML(yamlText) {
+    const panel = document.getElementById('result-panel');
+    const existing = document.getElementById('yaml-preview');
+    if (existing) existing.remove();
+    const pre = document.createElement('pre');
+    pre.id = 'yaml-preview';
+    pre.style.cssText = 'max-height:400px;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:4px;margin-top:0.5em;';
+    pre.textContent = yamlText.substring(0, 3000);
+    panel.appendChild(pre);
 }
 
 function downloadYAML() {
