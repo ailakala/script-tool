@@ -15,11 +15,18 @@ def assemble(meta: dict, config: dict, global_analysis: GlobalAnalysis,
              structure: ScriptStructure, scenes: list) -> AssemblyResult:
     result = AssemblyResult()
 
+    characters = _build_characters(global_analysis)
+    name_to_id = {c["name"]: c["id"] for c in characters}
+    # 也支持别名查找
+    for c in characters:
+        for alias in c.get("aliases", []):
+            name_to_id[alias] = c["id"]
+
     script = {
         "meta": meta,
         "config": config,
-        "characters": _build_characters(global_analysis),
-        "scenes": _build_scenes(scenes),
+        "characters": characters,
+        "scenes": _build_scenes(scenes, name_to_id),
         "extensions": _build_extensions(config.get("script_type", "other"), structure),
     }
 
@@ -61,9 +68,24 @@ def _build_characters(ga: GlobalAnalysis) -> list:
     return chars
 
 
-def _build_scenes(generated_scenes: list) -> list:
+def _build_scenes(generated_scenes: list, name_to_id: dict) -> list:
     scenes = []
     for gs in generated_scenes:
+        # 将 characters_present 中的角色名映射为 ID
+        char_present_ids = [
+            name_to_id.get(n, n) for n in gs.characters_present
+        ]
+
+        # 将 dialogue 类型 content 中的 character 角色名映射为 ID
+        content = []
+        for elem in gs.content:
+            new_elem = dict(elem)
+            if new_elem.get("type") == "dialogue" and new_elem.get("character"):
+                mapped = name_to_id.get(new_elem["character"])
+                if mapped:
+                    new_elem["character"] = mapped
+            content.append(new_elem)
+
         scene = {
             "id": gs.id,
             "act": gs.act,
@@ -74,8 +96,8 @@ def _build_scenes(generated_scenes: list) -> list:
                 "time": gs.time,
                 "description": gs.setting_description,
             },
-            "characters_present": gs.characters_present,
-            "content": gs.content,
+            "characters_present": char_present_ids,
+            "content": content,
             "page": None,
             "notes": "",
         }

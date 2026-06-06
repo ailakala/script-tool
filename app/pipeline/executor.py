@@ -115,6 +115,7 @@ async def run_stage_3(project_id: str, global_analysis: GlobalAnalysis,
 
 async def run_stage_4(project_id: str, structure: ScriptStructure,
                       characters: list, chapter_texts: dict,
+                      chapter_analyses: list = None,
                       provider: AIProvider = None,
                       notify=None,
                       cache_get: Optional[Callable] = None,
@@ -124,13 +125,14 @@ async def run_stage_4(project_id: str, structure: ScriptStructure,
 
     s4_hash = compute_input_hash(stage=4,
                                  structure_hash=_dataclass_list_hash(structure.scenes),
-                                 char_hash=_dict_list_hash(characters))
+                                 char_hash=_dict_list_hash(characters),
+                                 chapter_analyses_hash=_dataclass_list_hash(chapter_analyses) if chapter_analyses else "")
 
     async def _run():
         if notify:
             await notify(f"正在生成 {len(structure.scenes)} 场内容...")
         return await generate_scenes_parallel(
-            structure.scenes, characters, chapter_texts, provider
+            structure.scenes, characters, chapter_texts, chapter_analyses, provider
         )
 
     return await _cache_or_run(cache_get, cache_put, project_id, 4, s4_hash, _run)
@@ -206,6 +208,7 @@ async def run_pipeline(project_id: str, text: str, meta: dict, config: dict,
         state.set_stage(4, StageStatus.RUNNING)
         scenes = await run_stage_4(
             project_id, structure, global_analysis.characters, chapter_texts,
+            chapter_analyses,
             provider, notify, cache_get, cache_put)
         state.stage_results["scenes"] = scenes
         state.set_stage(4, StageStatus.DONE)
