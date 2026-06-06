@@ -3,14 +3,14 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from app.config import STORAGE_DIR, UPLOADS_DIR, CACHE_DIR
+from app.config import STORAGE_DIR, UPLOADS_DIR, CACHE_DIR, TEXT_STORE_DIR
 from app.db import init_db
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    for d in [STORAGE_DIR, UPLOADS_DIR, CACHE_DIR]:
+    for d in [STORAGE_DIR, UPLOADS_DIR, CACHE_DIR, TEXT_STORE_DIR]:
         d.mkdir(parents=True, exist_ok=True)
     init_db()
     yield

@@ -2,29 +2,122 @@
 {% block title %}剧本预览 — {{ project.title }}{% endblock %}
 {% block content %}
 <h1>{{ project.title }} — 剧本预览</h1>
-<div id="script-content" hx-get="/api/projects/{{ project.id }}/stage/5" hx-trigger="load">
+
+<div id="script-load-area" hx-get="/api/projects/{{ project.id }}/stage/5" hx-trigger="load">
     <p>加载中…</p>
 </div>
-<a href="/projects/{{ project.id }}">返回工作台</a>
+
+<div id="editor-toolbar" style="display:none;margin-top:1em">
+    <button id="edit-btn" onclick="enterEditMode()">✏️ 编辑剧本</button>
+    <a href="/projects/{{ project.id }}">返回工作台</a>
+</div>
+
+<div id="editor-actions" style="display:none;margin-top:1em">
+    <button id="save-btn" onclick="saveEdit()" style="background:#10b981">💾 保存修改</button>
+    <button id="cancel-btn" onclick="cancelEdit()" style="background:#6b7280">❌ 取消编辑</button>
+</div>
+
+<div id="toast" style="display:none;position:fixed;top:1em;right:1em;background:#10b981;color:#fff;padding:0.75em 1.5em;border-radius:8px;font-weight:600;z-index:9999;animation:fadeIn 0.3s ease"></div>
 
 <script>
-document.getElementById('script-content').addEventListener('htmx:afterSwap', function(e) {
+let _originalYAML = '';
+let _yamlText = '';
+
+// ── HTMX load handler ─────────────────────────────────────────────
+document.getElementById('script-load-area').addEventListener('htmx:afterSwap', function(e) {
     const data = JSON.parse(e.detail.xhr.responseText);
     if (data.status === 'not_run' || !data.data) {
-        e.target.innerHTML = '<p>剧本尚未生成，请先在工作台运行流水线。</p><a href="/projects/{{ project.id }}">前往工作台</a>';
+        e.target.innerHTML = '<p>剧本尚未生成，请先在工作台运行流水线。</p>'
+            + '<a href="/projects/{{ project.id }}" style="display:inline-block;margin-top:0.5em;padding:0.5em 1em;background:var(--accent);color:#fff;text-decoration:none;border-radius:6px">前往工作台</a>';
         return;
     }
-    const yamlText = data.data.yaml_text || '';
-    if (yamlText) {
-        const pre = document.createElement('pre');
-        pre.id = 'yaml-viewer';
-        pre.style.cssText = 'background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:4px;overflow:auto;max-height:80vh;white-space:pre-wrap;';
-        pre.textContent = yamlText;
-        e.target.innerHTML = '';
-        e.target.appendChild(pre);
+    _yamlText = data.data.yaml_text || '';
+    _originalYAML = _yamlText;
+    if (_yamlText) {
+        renderReadOnly();
+        document.getElementById('editor-toolbar').style.display = 'block';
     } else {
         e.target.innerHTML = '<p>剧本数据为空。请检查流水线是否完成。</p>';
     }
 });
+
+// ── Render read-only preview ───────────────────────────────────────
+function renderReadOnly() {
+    const area = document.getElementById('script-load-area');
+    const pre = document.createElement('pre');
+    pre.id = 'yaml-viewer';
+    pre.style.cssText = 'background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:6px;overflow:auto;max-height:70vh;white-space:pre-wrap;font-size:0.85em;line-height:1.5';
+    pre.textContent = _yamlText.substring(0, 100000);
+    area.innerHTML = '';
+    area.appendChild(pre);
+    document.getElementById('editor-toolbar').style.display = 'block';
+    document.getElementById('editor-actions').style.display = 'none';
+}
+
+// ── Enter edit mode ────────────────────────────────────────────────
+function enterEditMode() {
+    const area = document.getElementById('script-load-area');
+    area.innerHTML = '';
+    const ta = document.createElement('textarea');
+    ta.id = 'yaml-editor';
+    ta.style.cssText = 'width:100%;height:70vh;font-family:"Cascadia Code","Fira Code",Consolas,monospace;font-size:0.85em;line-height:1.5;padding:1em;border:2px solid var(--accent);border-radius:6px;background:#fff;color:#1a1a1a;resize:vertical';
+    ta.value = _yamlText;
+    ta.spellcheck = false;
+    area.appendChild(ta);
+    document.getElementById('editor-toolbar').style.display = 'none';
+    document.getElementById('editor-actions').style.display = 'block';
+}
+
+// ── Cancel edit ────────────────────────────────────────────────────
+function cancelEdit() {
+    _yamlText = _originalYAML;
+    renderReadOnly();
+}
+
+// ── Save edit ──────────────────────────────────────────────────────
+async function saveEdit() {
+    const ta = document.getElementById('yaml-editor');
+    const newYAML = ta ? ta.value : _yamlText;
+
+    const saveBtn = document.getElementById('save-btn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中…';
+
+    try {
+        const res = await fetch('/api/projects/{{ project.id }}/stage/5', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({yaml_text: newYAML}),
+        });
+        if (res.ok) {
+            _yamlText = newYAML;
+            _originalYAML = newYAML;
+            renderReadOnly();
+            showToast('✅ 修改已保存！');
+        } else {
+            const err = await res.json();
+            showToast('❌ 保存失败：' + (err.detail || '请重试'), true);
+        }
+    } catch (e) {
+        showToast('❌ 保存失败，请检查网络后重试', true);
+    }
+
+    saveBtn.disabled = false;
+    saveBtn.textContent = '💾 保存修改';
+}
+
+// ── Toast notification ─────────────────────────────────────────────
+function showToast(msg, isError) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.style.background = isError ? '#ef4444' : '#10b981';
+    toast.style.display = 'block';
+    toast.style.opacity = '1';
+    setTimeout(function() {
+        toast.style.transition = 'opacity 0.3s';
+        toast.style.opacity = '0';
+        setTimeout(function() { toast.style.display = 'none'; }, 300);
+    }, 2000);
+}
 </script>
 {% endblock %}
