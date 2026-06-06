@@ -8,9 +8,12 @@
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
+    <!-- 粒子背景 -->
+    <canvas id="particle-canvas"></canvas>
+
     <nav class="navbar">
         <div class="nav-left">
-            <a href="/" class="nav-brand">AI 剧本创作工具</a>
+            <a href="/" class="nav-brand">✦ AI 剧本创作工具</a>
             {% if project_count is defined and project_count > 0 %}
             <span class="nav-count">
                 {% if project_index is defined %}
@@ -23,17 +26,17 @@
         </div>
         <a href="/projects/new" class="nav-link">新建项目</a>
     </nav>
+
     <main class="container">
         {% block content %}{% endblock %}
     </main>
     <script>
-    // Cancel any pending shutdown on page load
     fetch('/health').catch(function(){});
-
-    // Request shutdown when page closes
-    window.addEventListener('beforeunload', function() {
-        navigator.sendBeacon('/api/shutdown');
-    });
+    setInterval(function() {
+        fetch('/health').catch(function(){});
+    }, 3000);
     </script>
+
+    <script src="/static/js/particles.js"></script>
 </body>
 </html>

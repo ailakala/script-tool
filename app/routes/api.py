@@ -563,8 +563,26 @@ async def download_script_txt(project_id: str, db: Session = Depends(get_db)):
     data = _get_assembly_data(project_id, db)
     screenplay_text = data.get("screenplay_text", "")
 
+    # 兼容旧缓存：如果没有 screenplay_text，尝试从 yaml_text 提取 scene_text 拼凑
     if not screenplay_text:
-        raise HTTPException(404, "剧本尚未生成，请先运行流水线")
+        yaml_text = data.get("yaml_text", "")
+        if not yaml_text:
+            raise HTTPException(404, "剧本尚未生成，请先运行流水线")
+        # 从 YAML 中提取 scene_text 作为兜底
+        import yaml as _yaml
+        try:
+            parsed = _yaml.safe_load(yaml_text)
+            texts = []
+            for scene in parsed.get("scenes", []):
+                st = scene.get("scene_text", "")
+                if st:
+                    texts.append(st)
+            if texts:
+                screenplay_text = "标题：《" + project.title + "》\n\n" + "\n\n".join(texts) + "\n\n剧终"
+            else:
+                screenplay_text = yaml_text  # 实在没有就用 YAML 原文
+        except Exception:
+            screenplay_text = yaml_text
 
     return PlainTextResponse(screenplay_text, media_type="text/plain; charset=utf-8",
                              headers={"Content-Disposition": f"attachment; filename={project.title}.txt"})

@@ -1,4 +1,7 @@
 import asyncio
+import os
+import signal
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
@@ -9,8 +12,16 @@ from app.db import init_db
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-_shutdown_task: asyncio.Task | None = None
-SHUTDOWN_DELAY = 2  # seconds to wait before shutdown
+_last_health = time.time()
+HEARTBEAT_TIMEOUT = 5  # seconds without ping before shutdown
+
+
+async def _heartbeat_watcher():
+    """Monitor health pings; exit gracefully if browser stops pinging."""
+    while True:
+        await asyncio.sleep(1)
+        if time.time() - _last_health > HEARTBEAT_TIMEOUT:
+            os.kill(os.getpid(), signal.SIGTERM)
 
 
 @asynccontextmanager
@@ -18,6 +29,7 @@ async def lifespan(app: FastAPI):
     for d in [STORAGE_DIR, UPLOADS_DIR, CACHE_DIR, TEXT_STORE_DIR]:
         d.mkdir(parents=True, exist_ok=True)
     init_db()
+    asyncio.create_task(_heartbeat_watcher())
     yield
 
 
@@ -38,23 +50,6 @@ app.include_router(chat_router)
 
 @app.get("/health")
 async def health():
-    global _shutdown_task
-    if _shutdown_task and not _shutdown_task.done():
-        _shutdown_task.cancel()
-        _shutdown_task = None
+    global _last_health
+    _last_health = time.time()
     return {"status": "ok"}
-
-
-@app.post("/api/shutdown")
-async def shutdown():
-    global _shutdown_task
-    if _shutdown_task and not _shutdown_task.done():
-        _shutdown_task.cancel()
-
-    async def _delayed_exit():
-        await asyncio.sleep(SHUTDOWN_DELAY)
-        import sys
-        sys.exit(0)
-
-    _shutdown_task = asyncio.create_task(_delayed_exit())
-    return {"status": "shutting_down"}

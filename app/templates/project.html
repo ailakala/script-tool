@@ -4,7 +4,7 @@
 <h1>{{ project.title }}</h1>
 <div class="workspace">
     <div class="panel" id="upload-panel">
-        <h2>1. 导入小说</h2>
+        <h2>📂 导入小说</h2>
         <form hx-encoding="multipart/form-data" hx-post="/api/projects/{{ project.id }}/upload" hx-target="#upload-result" hx-trigger="change from:#file-input" id="upload-form">
             <div class="drop-zone" id="drop-zone">
                 <div class="drop-zone-icon">📂</div>
@@ -13,62 +13,64 @@
             </div>
             <div class="file-input-wrapper" style="margin-bottom:0.75em">
                 <input type="file" name="file" id="file-input" accept=".txt,.docx,.md" style="display:none">
-                <button type="button" class="file-select-btn" onclick="document.getElementById('file-input').click()">选择文件</button>
+                <button type="button" class="file-select-btn" onclick="document.getElementById('file-input').click()">📁 选择文件</button>
                 <span id="file-name" class="file-name-text">未选择任何文件</span>
             </div>
         </form>
         <hr>
-        <textarea name="text" id="paste-text" placeholder="或直接粘贴小说文本..." rows="10" style="width:100%"></textarea>
-        <button hx-post="/api/projects/{{ project.id }}/paste" hx-include="#paste-text" hx-target="#upload-result">解析文本</button>
+        <textarea name="text" id="paste-text" placeholder="或直接粘贴小说文本..." rows="8" style="width:100%"></textarea>
+        <button hx-post="/api/projects/{{ project.id }}/paste" hx-include="#paste-text" hx-target="#upload-result" style="margin-top:0.5em">🔍 解析文本</button>
         <div id="upload-result"></div>
     </div>
 
     <div class="panel" id="pipeline-panel">
-        <h2>2. 生成剧本</h2>
+        <h2>⚡ 生成剧本</h2>
         <div style="display:flex;gap:0.5em;margin-bottom:1em">
-            <button id="run-btn" onclick="runPipeline()">一键生成</button>
-            <button id="step-btn" onclick="runStepByStep()">分步生成</button>
+            <button id="run-btn" onclick="runPipeline()">🚀 一键生成</button>
+            <button id="step-btn" onclick="runStepByStep()" class="btn-secondary">📋 分步生成</button>
         </div>
         <div id="progress-bar-container" style="margin-bottom:0.75em;display:none">
-            <div style="display:flex;align-items:center;gap:0.5em">
+            <div style="display:flex;align-items:center;gap:0.75em">
                 <progress id="progress-bar" value="0" max="100" style="flex:1"></progress>
-                <span id="progress-percent" style="font-weight:700;min-width:3em;text-align:right">0%</span>
+                <span id="progress-percent">0%</span>
             </div>
         </div>
-        <div id="completion-toast" style="display:none;position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:10000;background:#fff;border-radius:12px;padding:1em 1.5em;box-shadow:0 10px 40px rgba(0,0,0,0.2);animation:slideDown 0.4s ease">
+        <div id="completion-toast">
             <div style="display:flex;align-items:center;gap:0.75em">
                 <span style="font-size:2em">🎉</span>
                 <div>
-                    <strong style="font-size:1.1em">剧本生成完成！</strong>
-                    <p style="margin:0.25em 0 0;color:#6b7280;font-size:0.9em">全部 6 个阶段已处理完毕</p>
+                    <strong style="font-size:1.1em;color:var(--fg-primary)">剧本生成完成！</strong>
+                    <p style="margin:0.25em 0 0;color:var(--fg-secondary);font-size:0.9em">全部 6 个阶段已处理完毕</p>
                 </div>
-                <button onclick="closeCompletionToast()" style="background:none;border:none;font-size:1.2em;cursor:pointer;color:#9ca3af;padding:0 0.25em;margin-left:0.5em">✕</button>
+                <button onclick="closeCompletionToast()" class="btn-ghost" style="margin-left:0.5em">✕</button>
             </div>
         </div>
         <div id="progress">
-            <div id="stage-0" class="stage">Stage 0: 文本预处理</div>
-            <div id="stage-1" class="stage">Stage 1: 分章节分析</div>
-            <div id="stage-2" class="stage">Stage 2: 跨章节综合</div>
-            <div id="stage-3" class="stage">Stage 3: 剧本结构设计</div>
-            <div id="stage-4" class="stage">Stage 4: 逐场内容生成</div>
-            <div id="stage-5" class="stage">Stage 5: 组装 & 校验</div>
+            <div id="stage-0" class="stage">文本预处理</div>
+            <div id="stage-1" class="stage">分章节分析</div>
+            <div id="stage-2" class="stage">跨章节综合</div>
+            <div id="stage-3" class="stage">剧本结构设计</div>
+            <div id="stage-4" class="stage">逐场内容生成</div>
+            <div id="stage-5" class="stage">组装 & 校验</div>
         </div>
     </div>
 
     <div class="panel" id="review-panel" style="display:none">
-        <h2>审查中间结果</h2>
+        <h2>🔍 审查中间结果</h2>
         <div id="review-content"></div>
-        <div style="margin-top:1em">
-            <button id="continue-btn" onclick="continuePipeline()" style="display:none">继续下一阶段</button>
-            <button id="skip-review-btn" onclick="skipToEnd()" style="display:none">跳过审查，直接完成</button>
+        <div class="mt-2 flex gap-1">
+            <button id="continue-btn" onclick="continuePipeline()" style="display:none">▶ 继续下一阶段</button>
+            <button id="skip-review-btn" onclick="skipToEnd()" class="btn-secondary" style="display:none">⏭ 跳过审查</button>
         </div>
     </div>
 
     <div class="panel" id="result-panel">
-        <h2>3. 查看结果</h2>
-        <a href="/projects/{{ project.id }}/script">查看/编辑剧本</a>
-        <button onclick="downloadScript()" style="margin-left:1em">下载 TXT 剧本</button>
-        <button onclick="downloadYAML()" style="margin-left:0.5em">下载 YAML</button>
+        <h2>📄 查看结果</h2>
+        <div class="flex gap-1">
+            <a href="/projects/{{ project.id }}/script" class="btn" style="display:inline-flex;text-decoration:none">📝 查看/编辑剧本</a>
+            <button onclick="downloadScript()" class="btn-secondary">⬇ 下载 TXT</button>
+            <button onclick="downloadYAML()" class="btn-secondary">⬇ 下载 YAML</button>
+        </div>
     </div>
 </div>
 
@@ -132,8 +134,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                 if (data.status === 'cached') {
                     updateStage(s, 'done', '');
                     maxDone = Math.max(maxDone, s);
-                    if (s === 5 && data.data && data.data.yaml_text) {
-                        showYAML(data.data.yaml_text);
+                    if (s === 5 && data.data) {
+                        showResult(data.data.screenplay_text || data.data.yaml_text || '');
                     }
                 }
             }
@@ -191,7 +193,7 @@ function setButtons(disabled) {
 function updateStage(stage, status, message) {
     const el = document.getElementById('stage-' + stage);
     if (el) {
-        if (message) el.textContent = 'Stage ' + stage + ': ' + message;
+        if (message) el.textContent = message;
         el.className = 'stage ' + status;
     }
 }
@@ -203,7 +205,6 @@ function updateProgress(percent) {
     if (container) container.style.display = 'block';
     if (bar) bar.value = percent;
     if (pct) pct.textContent = percent + '%';
-    if (percent >= 100 && bar) bar.style.accentColor = '#10b981';
 }
 
 async function streamSSE(url, onMessage) {
@@ -244,6 +245,7 @@ async function runPipeline() {
             if (msg.errors && msg.errors.length > 0) {
                 alert('Done with errors:\n' + msg.errors.join('\n'));
             }
+            showCompletionToast();
             if (msg.screenplay_text || msg.yaml_text) {
                 showResult(msg.screenplay_text || msg.yaml_text);
             }
@@ -293,8 +295,8 @@ async function runNextStage() {
 
             if (_stepMode && (stage === 1 || stage === 2 || stage === 3)) {
                 reviewPanel.style.display = 'block';
-                document.getElementById('continue-btn').style.display = 'inline-block';
-                document.getElementById('skip-review-btn').style.display = 'inline-block';
+                document.getElementById('continue-btn').style.display = 'inline-flex';
+                document.getElementById('skip-review-btn').style.display = 'inline-flex';
                 document.getElementById('review-content').innerHTML =
                     '<div hx-get="/api/projects/{{ project.id }}/stage/' + stage + '" hx-trigger="load">Loading...</div>';
             } else if (_nextStage <= 5) {
@@ -302,6 +304,7 @@ async function runNextStage() {
             } else {
                 setButtons(false);
                 reviewPanel.style.display = 'none';
+                showCompletionToast();
                 fetch('/api/projects/{{ project.id }}/stage/5')
                     .then(r => r.json())
                     .then(d => { if (d.data) showResult(d.data.screenplay_text || d.data.yaml_text || ''); });
@@ -319,13 +322,31 @@ async function runNextStage() {
     }
 }
 
+function showCompletionToast() {
+    const toast = document.getElementById('completion-toast');
+    if (toast) {
+        toast.style.display = 'block';
+        setTimeout(function() {
+            toast.style.transition = 'opacity 0.3s';
+            toast.style.opacity = '0';
+            setTimeout(function() { toast.style.display = 'none'; toast.style.opacity = '1'; }, 300);
+        }, 3000);
+    }
+}
+
+function closeCompletionToast() {
+    const toast = document.getElementById('completion-toast');
+    if (toast) {
+        toast.style.display = 'none';
+    }
+}
+
 function showResult(text) {
     const panel = document.getElementById('result-panel');
     const existing = document.getElementById('script-preview');
     if (existing) existing.remove();
     const pre = document.createElement('pre');
     pre.id = 'script-preview';
-    pre.style.cssText = 'max-height:400px;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:4px;margin-top:0.5em;white-space:pre-wrap;font-size:0.9em;line-height:1.6';
     pre.textContent = text.substring(0, 5000);
     panel.appendChild(pre);
 }
