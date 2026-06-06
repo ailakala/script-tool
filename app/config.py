@@ -7,12 +7,14 @@ load_dotenv(BASE_DIR / ".env")
 STORAGE_DIR = BASE_DIR / "storage"
 UPLOADS_DIR = STORAGE_DIR / "uploads"
 CACHE_DIR = STORAGE_DIR / "cache"
+TEXT_STORE_DIR = STORAGE_DIR / "texts"
 DATABASE_URL = os.getenv("SCRIPT_TOOL_DATABASE_URL", f"sqlite:///{STORAGE_DIR / 'db.sqlite'}")
 
 AI_PROVIDER = os.getenv("SCRIPT_TOOL_AI_PROVIDER", "claude")
 AI_MODEL = os.getenv("SCRIPT_TOOL_AI_MODEL", "claude-sonnet-4-6")
 ANTHROPIC_API_KEY = os.getenv("SCRIPT_TOOL_ANTHROPIC_API_KEY")
 OPENAI_API_KEY = os.getenv("SCRIPT_TOOL_OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("SCRIPT_TOOL_OPENAI_BASE_URL")
 LOCAL_LLM_URL = os.getenv("SCRIPT_TOOL_LOCAL_LLM_URL", "http://localhost:1234/v1")
 LOCAL_LLM_API_KEY = os.getenv("SCRIPT_TOOL_LOCAL_LLM_API_KEY", "not-needed")
 
