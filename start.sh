@@ -12,11 +12,11 @@ if [ ! -f .env ]; then
 fi
 
 # 安装依赖（如果需要）
-if ! python -c "import fastapi" 2>/dev/null; then
+if ! python.exe -c "import fastapi" 2>/dev/null; then
     echo ">>> 安装依赖..."
-    pip install -r requirements.txt
+    pip.exe install -r requirements.txt
 fi
 
 echo ">>> 启动服务..."
 echo ">>> 打开浏览器访问 http://localhost:8000"
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

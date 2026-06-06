@@ -27,6 +27,7 @@ class PipelineState:
     stage_results: dict = field(default_factory=dict)
     errors: list = field(default_factory=list)
     progress_callback: object = None
+    percent: int = 0
 
     def set_stage(self, stage: int, status: StageStatus):
         self.stage_status[stage] = status.value
@@ -59,6 +60,7 @@ async def run_stage_0(project_id: str, text: str,
 async def run_stage_1(project_id: str, text: str, chapters: list,
                       provider: AIProvider = None,
                       notify=None,
+                      on_chapter_done=None,
                       cache_get: Optional[Callable] = None,
                       cache_put: Optional[Callable] = None) -> list:
     if provider is None:
@@ -69,7 +71,7 @@ async def run_stage_1(project_id: str, text: str, chapters: list,
     async def _run():
         if notify:
             await notify(f"正在分析 {len(chapters)} 个章节...")
-        return await analyze_chapters_parallel(chapters, provider)
+        return await analyze_chapters_parallel(chapters, provider, on_chapter_done)
 
     return await _cache_or_run(cache_get, cache_put, project_id, 1, s1_hash, _run)
 
@@ -115,8 +117,10 @@ async def run_stage_3(project_id: str, global_analysis: GlobalAnalysis,
 
 async def run_stage_4(project_id: str, structure: ScriptStructure,
                       characters: list, chapter_texts: dict,
+                      chapter_analyses: list = None,
                       provider: AIProvider = None,
                       notify=None,
+                      on_scene_done=None,
                       cache_get: Optional[Callable] = None,
                       cache_put: Optional[Callable] = None) -> list:
     if provider is None:
@@ -124,13 +128,14 @@ async def run_stage_4(project_id: str, structure: ScriptStructure,
 
     s4_hash = compute_input_hash(stage=4,
                                  structure_hash=_dataclass_list_hash(structure.scenes),
-                                 char_hash=_dict_list_hash(characters))
+                                 char_hash=_dict_list_hash(characters),
+                                 chapter_analyses_hash=_dataclass_list_hash(chapter_analyses) if chapter_analyses else "")
 
     async def _run():
         if notify:
             await notify(f"正在生成 {len(structure.scenes)} 场内容...")
         return await generate_scenes_parallel(
-            structure.scenes, characters, chapter_texts, provider
+            structure.scenes, characters, chapter_texts, chapter_analyses, provider, on_scene_done
         )
 
     return await _cache_or_run(cache_get, cache_put, project_id, 4, s4_hash, _run)
@@ -168,49 +173,87 @@ async def run_pipeline(project_id: str, text: str, meta: dict, config: dict,
 
     state = PipelineState(project_id=project_id, progress_callback=progress_callback)
 
+    # 各阶段权重（总和 100%）
+    STAGE_WEIGHTS = [5, 30, 10, 10, 40, 5]
+
     async def notify(msg):
         await _notify(state, msg)
 
     try:
-        # Stage 0
+        # Stage 0: 预处理
         state.set_stage(0, StageStatus.RUNNING)
+        state.percent = 0
         preprocess = await run_stage_0(project_id, text, notify, cache_get, cache_put)
         chapter_texts = {ch.index: ch.content for ch in preprocess.chapters}
         state.stage_results["preprocess"] = preprocess
         state.stage_results["meta"] = meta
         state.stage_results["config"] = config
         state.set_stage(0, StageStatus.DONE)
+        state.percent = STAGE_WEIGHTS[0]  # 5%
+        await notify("文本预处理完成")
 
-        # Stage 1
+        # Stage 1: 分章节分析（N 个章节并行，逐章更新进度）
         state.set_stage(1, StageStatus.RUNNING)
+        n_chapters = len(preprocess.chapters)
+        s1_done = 0
+        s1_base = STAGE_WEIGHTS[0]  # 5%
+
+        async def on_chapter_done():
+            nonlocal s1_done
+            s1_done += 1
+            pct_in_stage = int(s1_done / n_chapters * STAGE_WEIGHTS[1])
+            state.percent = min(s1_base + pct_in_stage, 99)
+            await _notify(state, f"章节分析 {s1_done}/{n_chapters}")
+
         chapter_analyses = await run_stage_1(
-            project_id, text, preprocess.chapters, provider, notify, cache_get, cache_put)
+            project_id, text, preprocess.chapters, provider, notify,
+            on_chapter_done, cache_get, cache_put)
         state.stage_results["chapter_analyses"] = chapter_analyses
         state.set_stage(1, StageStatus.DONE)
+        state.percent = s1_base + STAGE_WEIGHTS[1]  # 35%
+        await notify(f"{n_chapters} 个章节分析完成")
 
-        # Stage 2
+        # Stage 2: 跨章节综合
         state.set_stage(2, StageStatus.RUNNING)
         global_analysis = await run_stage_2(
             project_id, chapter_analyses, provider, notify, cache_get, cache_put)
         state.stage_results["global_analysis"] = global_analysis
         state.set_stage(2, StageStatus.DONE)
+        state.percent = s1_base + STAGE_WEIGHTS[1] + STAGE_WEIGHTS[2]  # 45%
+        await notify("人物和情节综合完成")
 
-        # Stage 3
+        # Stage 3: 剧本结构设计
         state.set_stage(3, StageStatus.RUNNING)
         structure = await run_stage_3(
             project_id, global_analysis, config, provider, notify, cache_get, cache_put)
         state.stage_results["structure"] = structure
         state.set_stage(3, StageStatus.DONE)
+        state.percent = sum(STAGE_WEIGHTS[:4])  # 55%
+        await notify("剧本结构设计完成")
 
-        # Stage 4
+        # Stage 4: 逐场内容生成（M 个场景并行，逐场更新进度）
         state.set_stage(4, StageStatus.RUNNING)
+        n_scenes = len(structure.scenes)
+        s4_done = 0
+        s4_base = sum(STAGE_WEIGHTS[:4])  # 55%
+
+        async def on_scene_done():
+            nonlocal s4_done
+            s4_done += 1
+            pct_in_stage = int(s4_done / n_scenes * STAGE_WEIGHTS[4])
+            state.percent = min(s4_base + pct_in_stage, 99)
+            await _notify(state, f"场景生成 {s4_done}/{n_scenes}")
+
         scenes = await run_stage_4(
             project_id, structure, global_analysis.characters, chapter_texts,
-            provider, notify, cache_get, cache_put)
+            chapter_analyses,
+            provider, notify, on_scene_done, cache_get, cache_put)
         state.stage_results["scenes"] = scenes
         state.set_stage(4, StageStatus.DONE)
+        state.percent = s4_base + STAGE_WEIGHTS[4]  # 95%
+        await notify(f"{n_scenes} 场内容生成完成")
 
-        # Stage 5
+        # Stage 5: 组装 & 校验
         state.set_stage(5, StageStatus.RUNNING)
         result = await run_stage_5(
             project_id, meta, config, global_analysis, structure, scenes,
@@ -221,6 +264,8 @@ async def run_pipeline(project_id: str, text: str, meta: dict, config: dict,
                 if w.startswith("ERROR"):
                     state.errors.append(w)
         state.set_stage(5, StageStatus.DONE)
+        state.percent = 100
+        await notify("剧本生成完成")
 
     except Exception as e:
         state.set_stage(state.current_stage, StageStatus.ERROR)
@@ -265,4 +310,5 @@ async def _notify(state: PipelineState, message: str):
             "current_stage": state.current_stage,
             "stage_status": state.stage_status,
             "message": message,
+            "percent": state.percent,
         })

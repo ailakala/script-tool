@@ -3,13 +3,16 @@ from typing import AsyncIterator
 from openai import AsyncOpenAI
 
 from app.ai.interface import AIProvider
-from app.config import OPENAI_API_KEY
+from app.config import OPENAI_API_KEY, OPENAI_BASE_URL
 
 
 class OpenAIProvider(AIProvider):
     def __init__(self, model: str = "gpt-4o"):
         self._model = model
-        self._client = AsyncOpenAI(api_key=OPENAI_API_KEY or "not-configured")
+        kwargs = {"api_key": OPENAI_API_KEY or "not-configured"}
+        if OPENAI_BASE_URL:
+            kwargs["base_url"] = OPENAI_BASE_URL
+        self._client = AsyncOpenAI(**kwargs)
 
     def model_name(self) -> str:
         return self._model

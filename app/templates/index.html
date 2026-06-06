@@ -10,6 +10,12 @@
             <span class="badge">{{ p.script_type }}</span>
             <span class="status {{ p.status }}">{{ p.status }}</span>
             <time>{{ p.updated_at[:10] if p.updated_at }}</time>
+            <button class="btn-danger"
+                    hx-delete="/api/projects/{{ p.id }}"
+                    hx-confirm="确定要删除项目「{{ p.title }}」吗？此操作不可撤销。"
+                    hx-target="closest .project-card"
+                    hx-swap="delete"
+                    style="margin-left:auto">🗑 删除</button>
         </div>
         {% endfor %}
     {% else %}
