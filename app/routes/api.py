@@ -196,6 +196,15 @@ async def paste_text(project_id: str, request: Request,
 
     return resp_data
 
+
+@router.get("/projects/{project_id}/text")
+async def get_text(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    text = _load_text(project_id)
+    return {"text": text, "project_id": project_id}
+
 @router.post("/projects/{project_id}/run")
 async def run_pipeline_endpoint(project_id: str, request: Request,
                                 db: Session = Depends(get_db)):
@@ -205,6 +214,8 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
 
     body = await request.json()
     text = body.get("text", "") or _load_text(project_id)
+    if text:
+        _save_text(project_id, text)
     if not text:
         raise HTTPException(400, "请先上传或粘贴小说文本")
 
@@ -331,6 +342,8 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
     run_id = run.id  # save before detach
     body_data = await request.json()
     input_text = body_data.get("text", "") or _load_text(project_id)
+    if input_text:
+        _save_text(project_id, input_text)
 
     async def event_stream():
         queue: asyncio.Queue = asyncio.Queue()
@@ -385,7 +398,7 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
                     raise ValueError("请先运行 Stage 0")
                 if not input_text:
                     raise ValueError("请提供小说文本")
-                return await run_stage_1(project_id, input_text, s0.chapters, provider, notify, cache_get, cache_put)
+                return await run_stage_1(project_id, input_text, s0.chapters, provider, notify, None, cache_get, cache_put)
 
             elif stage == 2:
                 s1 = _get_latest_cached(db, project_id, 1)
@@ -406,8 +419,8 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
                 if s2 is None or s3 is None or s0 is None:
                     raise ValueError("请先运行 Stage 0-3")
                 chapter_texts = {ch.index: ch.content for ch in s0.chapters}
-                return await run_stage_4(project_id, s3, s2.characters, chapter_texts,
-                                         provider, notify, cache_get, cache_put)
+                return await run_stage_4(project_id, s3, s2.characters, chapter_texts, None,
+                                         provider, notify, None, cache_get, cache_put)
 
             elif stage == 5:
                 s2 = _get_latest_cached(db, project_id, 2)
