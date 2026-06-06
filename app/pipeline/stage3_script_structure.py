@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from app.ai.interface import AIProvider
 from app.ai.factory import create_ai_provider
 from app.pipeline.stage2_cross_chapter_synthesis import GlobalAnalysis
+from app.pipeline.utils import extract_json
 
 @dataclass
 class ScenePlan:
@@ -73,12 +74,8 @@ async def design_structure(global_analysis: GlobalAnalysis, config: dict,
 
 def _parse_structure(response: str, script_type: str) -> ScriptStructure:
     result = ScriptStructure(script_type=script_type, raw_response=response)
-    try:
-        text = response.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            text = "\n".join(lines[1:-1])
-        data = json.loads(text)
+    data = extract_json(response)
+    if data:
         for i, s in enumerate(data.get("scenes", [])):
             result.scenes.append(ScenePlan(
                 id=f"scene_{i+1:03d}",
@@ -94,6 +91,4 @@ def _parse_structure(response: str, script_type: str) -> ScriptStructure:
             ))
         result.episode_summaries = data.get("episode_summaries", [])
         result.beat_sheet = data.get("beat_sheet", [])
-    except (json.JSONDecodeError, KeyError):
-        pass
     return result

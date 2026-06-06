@@ -21,11 +21,25 @@ document.getElementById('stage-content').addEventListener('htmx:afterSwap', func
         return;
     }
     if (data.data) {
+        // Stage 5: 优先显示纯中文剧本格式
+        {% if stage == 5 %}
+        const text = data.data.screenplay_text || data.data.yaml_text || '';
+        if (text) {
+            const pre = document.createElement('pre');
+            pre.style.cssText = 'max-height:70vh;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:1.5em;border-radius:8px;white-space:pre-wrap;font-size:0.9em;line-height:1.7;font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif';
+            pre.textContent = text.substring(0, 100000);
+            e.target.innerHTML = '';
+            e.target.appendChild(pre);
+        } else {
+            e.target.innerHTML = '<p>剧本数据为空。</p>';
+        }
+        {% else %}
         const pre = document.createElement('pre');
         pre.style.cssText = 'max-height:70vh;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:4px;';
         pre.textContent = JSON.stringify(data.data, null, 2);
         e.target.innerHTML = '';
         e.target.appendChild(pre);
+        {% endif %}
     }
 });
 </script>
