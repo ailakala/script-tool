@@ -4,52 +4,117 @@
 <h1>{{ project.title }}</h1>
 <div class="workspace">
     <div class="panel" id="upload-panel">
-        <h2>1. 导入小说</h2>
-        <form hx-encoding="multipart/form-data" hx-post="/api/projects/{{ project.id }}/upload" hx-target="#upload-result">
-            <input type="file" name="file" accept=".txt,.docx,.md">
-            <button type="submit">上传文件</button>
+        <h2>📂 导入小说</h2>
+        <form hx-encoding="multipart/form-data" hx-post="/api/projects/{{ project.id }}/upload" hx-target="#upload-result" hx-trigger="change from:#file-input">
+            <div class="file-input-wrapper" style="display:flex;align-items:center">
+                <input type="file" name="file" id="file-input" accept=".txt,.docx,.md" style="display:none">
+                <button type="button" class="file-select-btn" onclick="document.getElementById('file-input').click()">📁 选择文件</button>
+                <span id="file-name" class="file-name-text">未选择任何文件（支持 .txt / .docx / .md）</span>
+            </div>
         </form>
         <hr>
-        <textarea name="text" placeholder="或直接粘贴小说文本..." rows="10" style="width:100%"></textarea>
-        <button hx-post="/api/projects/{{ project.id }}/paste" hx-include="previous textarea" hx-target="#upload-result">解析文本</button>
+        <textarea name="text" id="paste-text" placeholder="或直接粘贴小说文本..." rows="8" style="width:100%"></textarea>
+        <button hx-post="/api/projects/{{ project.id }}/paste" hx-include="#paste-text" hx-target="#upload-result" style="margin-top:0.5em">🔍 解析文本</button>
         <div id="upload-result"></div>
     </div>
 
     <div class="panel" id="pipeline-panel">
-        <h2>2. 生成剧本</h2>
+        <h2>⚡ 生成剧本</h2>
         <div style="display:flex;gap:0.5em;margin-bottom:1em">
-            <button id="run-btn" onclick="runPipeline()">一键生成</button>
-            <button id="step-btn" onclick="runStepByStep()">分步生成</button>
+            <button id="run-btn" onclick="runPipeline()">🚀 一键生成</button>
+            <button id="step-btn" onclick="runStepByStep()" class="btn-secondary">📋 分步生成</button>
+        </div>
+        <div id="progress-bar-container" style="margin-bottom:0.75em;display:none">
+            <div style="display:flex;align-items:center;gap:0.75em">
+                <progress id="progress-bar" value="0" max="100" style="flex:1"></progress>
+                <span id="progress-percent">0%</span>
+            </div>
+        </div>
+        <div id="completion-toast">
+            <div style="display:flex;align-items:center;gap:0.75em">
+                <span style="font-size:2em">🎉</span>
+                <div>
+                    <strong style="font-size:1.1em;color:var(--fg-primary)">剧本生成完成！</strong>
+                    <p style="margin:0.25em 0 0;color:var(--fg-secondary);font-size:0.9em">全部 6 个阶段已处理完毕</p>
+                </div>
+                <button onclick="closeCompletionToast()" class="btn-ghost" style="margin-left:0.5em">✕</button>
+            </div>
         </div>
         <div id="progress">
-            <div id="stage-0" class="stage">Stage 0: 文本预处理</div>
-            <div id="stage-1" class="stage">Stage 1: 分章节分析</div>
-            <div id="stage-2" class="stage">Stage 2: 跨章节综合</div>
-            <div id="stage-3" class="stage">Stage 3: 剧本结构设计</div>
-            <div id="stage-4" class="stage">Stage 4: 逐场内容生成</div>
-            <div id="stage-5" class="stage">Stage 5: 组装 & 校验</div>
+            <div id="stage-0" class="stage">文本预处理</div>
+            <div id="stage-1" class="stage">分章节分析</div>
+            <div id="stage-2" class="stage">跨章节综合</div>
+            <div id="stage-3" class="stage">剧本结构设计</div>
+            <div id="stage-4" class="stage">逐场内容生成</div>
+            <div id="stage-5" class="stage">组装 & 校验</div>
         </div>
     </div>
 
     <div class="panel" id="review-panel" style="display:none">
-        <h2>审查中间结果</h2>
+        <h2>🔍 审查中间结果</h2>
         <div id="review-content"></div>
-        <div style="margin-top:1em">
-            <button id="continue-btn" onclick="continuePipeline()" style="display:none">继续下一阶段</button>
-            <button id="skip-review-btn" onclick="skipToEnd()" style="display:none">跳过审查，直接完成</button>
+        <div class="mt-2 flex gap-1">
+            <button id="continue-btn" onclick="continuePipeline()" style="display:none">▶ 继续下一阶段</button>
+            <button id="skip-review-btn" onclick="skipToEnd()" class="btn-secondary" style="display:none">⏭ 跳过审查</button>
         </div>
     </div>
 
     <div class="panel" id="result-panel">
-        <h2>3. 查看结果</h2>
-        <a href="/projects/{{ project.id }}/script">查看/编辑剧本</a>
-        <button onclick="downloadYAML()" style="margin-left:1em">下载 YAML</button>
+        <h2>📄 查看结果</h2>
+        <div class="flex gap-1">
+            <a href="/projects/{{ project.id }}/script" class="btn" style="display:inline-flex;text-decoration:none">📝 查看/编辑剧本</a>
+            <button onclick="downloadScript()" class="btn-secondary">⬇ 下载 TXT</button>
+            <button onclick="downloadYAML()" class="btn-secondary">⬇ 下载 YAML</button>
+        </div>
     </div>
 </div>
 
 <script>
 let _nextStage = 1;
 let _stepMode = false;
+
+// ── Page load: restore saved state ──────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', async function() {
+    // Restore saved input text
+    try {
+        const res = await fetch('/api/projects/{{ project.id }}/text');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.text) {
+                const textarea = document.querySelector('textarea[name="text"]');
+                if (textarea) textarea.value = data.text;
+            }
+        }
+    } catch(e) { /* network or parse error — textarea stays empty */ }
+
+    // Restore stage results and progress
+    let maxDone = -1;
+    for (let s = 0; s <= 5; s++) {
+        try {
+            const res = await fetch('/api/projects/{{ project.id }}/stage/' + s);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.status === 'cached') {
+                    updateStage(s, 'done', '');
+                    maxDone = Math.max(maxDone, s);
+                    if (s === 5 && data.data) {
+                        showResult(data.data.screenplay_text || data.data.yaml_text || '');
+                    }
+                }
+            }
+        } catch(e) { /* skip stages that haven't been run */ }
+    }
+    if (maxDone >= 0) {
+        updateProgress(Math.min((maxDone + 1) * 100 / 6, 100));
+    }
+});
+
+// 文件选择后自动显示文件名
+document.getElementById('file-input').addEventListener('change', function() {
+    const name = this.files[0] ? this.files[0].name : '未选择任何文件（支持 .txt / .docx / .md 格式）';
+    document.getElementById('file-name').textContent = name;
+});
 
 function getText() {
     const textarea = document.querySelector('textarea[name="text"]');
@@ -64,9 +129,18 @@ function setButtons(disabled) {
 function updateStage(stage, status, message) {
     const el = document.getElementById('stage-' + stage);
     if (el) {
-        if (message) el.textContent = 'Stage ' + stage + ': ' + message;
+        if (message) el.textContent = message;
         el.className = 'stage ' + status;
     }
+}
+
+function updateProgress(percent) {
+    const bar = document.getElementById('progress-bar');
+    const pct = document.getElementById('progress-percent');
+    const container = document.getElementById('progress-bar-container');
+    if (container) container.style.display = 'block';
+    if (bar) bar.value = percent;
+    if (pct) pct.textContent = percent + '%';
 }
 
 async function streamSSE(url, onMessage) {
@@ -101,6 +175,7 @@ async function runPipeline() {
     document.getElementById('review-panel').style.display = 'none';
 
     const ok = await streamSSE('/api/projects/{{ project.id }}/run', function(msg) {
+        if (msg.percent !== undefined) updateProgress(msg.percent);
         if (msg.message && msg.current_stage !== undefined) {
             updateStage(msg.current_stage, msg.stage_status[msg.current_stage], msg.message);
         }
@@ -108,8 +183,9 @@ async function runPipeline() {
             if (msg.errors && msg.errors.length > 0) {
                 alert('完成，但有错误:\n' + msg.errors.join('\n'));
             }
-            if (msg.yaml_text) {
-                showYAML(msg.yaml_text);
+            showCompletionToast();
+            if (msg.screenplay_text || msg.yaml_text) {
+                showResult(msg.screenplay_text || msg.yaml_text);
             }
         }
     });
@@ -138,7 +214,6 @@ async function skipToEnd() {
     document.getElementById('continue-btn').style.display = 'none';
     document.getElementById('skip-review-btn').style.display = 'none';
     document.getElementById('review-panel').style.display = 'none';
-    // Use one-shot mode — cached stages will be skipped
     setButtons(false);
     runPipeline();
 }
@@ -150,6 +225,7 @@ async function runNextStage() {
     reviewPanel.style.display = 'none';
 
     const ok = await streamSSE('/api/projects/{{ project.id }}/run-stage/' + stage, function(msg) {
+        if (msg.percent !== undefined) updateProgress(msg.percent);
         if (msg.message) {
             updateStage(stage, 'running', msg.message);
         }
@@ -158,23 +234,20 @@ async function runNextStage() {
             _nextStage = stage + 1;
 
             if (_stepMode && (stage === 1 || stage === 2 || stage === 3)) {
-                // Pause for review
                 reviewPanel.style.display = 'block';
-                document.getElementById('continue-btn').style.display = 'inline-block';
-                document.getElementById('skip-review-btn').style.display = 'inline-block';
+                document.getElementById('continue-btn').style.display = 'inline-flex';
+                document.getElementById('skip-review-btn').style.display = 'inline-flex';
                 document.getElementById('review-content').innerHTML =
                     '<div hx-get="/api/projects/{{ project.id }}/stage/' + stage + '" hx-trigger="load">加载中间结果…</div>';
             } else if (_nextStage <= 5) {
-                // Auto-continue
                 runNextStage();
             } else {
-                // Done
                 setButtons(false);
                 reviewPanel.style.display = 'none';
-                // Load YAML into result panel
+                showCompletionToast();
                 fetch('/api/projects/{{ project.id }}/stage/5')
                     .then(r => r.json())
-                    .then(d => { if (d.data && d.data.yaml_text) showYAML(d.data.yaml_text); });
+                    .then(d => { if (d.data) showResult(d.data.screenplay_text || d.data.yaml_text || ''); });
             }
         }
         if (msg.status === 'error') {
@@ -189,15 +262,37 @@ async function runNextStage() {
     }
 }
 
-function showYAML(yamlText) {
+function showCompletionToast() {
+    const toast = document.getElementById('completion-toast');
+    if (toast) {
+        toast.style.display = 'block';
+        setTimeout(function() {
+            toast.style.transition = 'opacity 0.3s';
+            toast.style.opacity = '0';
+            setTimeout(function() { toast.style.display = 'none'; toast.style.opacity = '1'; }, 300);
+        }, 3000);
+    }
+}
+
+function closeCompletionToast() {
+    const toast = document.getElementById('completion-toast');
+    if (toast) {
+        toast.style.display = 'none';
+    }
+}
+
+function showResult(text) {
     const panel = document.getElementById('result-panel');
-    const existing = document.getElementById('yaml-preview');
+    const existing = document.getElementById('script-preview');
     if (existing) existing.remove();
     const pre = document.createElement('pre');
-    pre.id = 'yaml-preview';
-    pre.style.cssText = 'max-height:400px;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:4px;margin-top:0.5em;';
-    pre.textContent = yamlText.substring(0, 3000);
+    pre.id = 'script-preview';
+    pre.textContent = text.substring(0, 5000);
     panel.appendChild(pre);
+}
+
+function downloadScript() {
+    window.open('/api/projects/{{ project.id }}/script.txt', '_blank');
 }
 
 function downloadYAML() {

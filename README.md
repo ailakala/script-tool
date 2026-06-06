@@ -91,10 +91,8 @@ bash start.sh
 
 ## 常见问题
 
-**Q: WSL 下启动后数据库报错 "database is locked"？**
-A: 设置数据库路径到 Windows 本机目录：
-```bash
-export SCRIPT_TOOL_DATABASE_URL="sqlite:///C:/Users/<你的用户名>/script_tool.db"
+**Q: WSL / Git Bash 下启动后数据库报错 "database is locked"？**
+A: 此问题已自动处理。`config.py` 启动时会检测运行环境，自动将数据库重定向到 Windows 本机路径（`C:/Users/<用户名>/script_tool.db`），无需手动配置。
 ```
 
 **Q: 用 LM Studio 时提示连接失败？**
