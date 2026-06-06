@@ -70,6 +70,43 @@
 let _nextStage = 1;
 let _stepMode = false;
 
+// ── Page load: restore saved state ──────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', async function() {
+    // Restore saved input text
+    try {
+        const res = await fetch('/api/projects/{{ project.id }}/text');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.text) {
+                const textarea = document.querySelector('textarea[name="text"]');
+                if (textarea) textarea.value = data.text;
+            }
+        }
+    } catch(e) { /* network or parse error — textarea stays empty */ }
+
+    // Restore stage results and progress
+    let maxDone = -1;
+    for (let s = 0; s <= 5; s++) {
+        try {
+            const res = await fetch('/api/projects/{{ project.id }}/stage/' + s);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.status === 'cached') {
+                    updateStage(s, 'done', '');
+                    maxDone = Math.max(maxDone, s);
+                    if (s === 5 && data.data && data.data.yaml_text) {
+                        showYAML(data.data.yaml_text);
+                    }
+                }
+            }
+        } catch(e) { /* skip stages that haven't been run */ }
+    }
+    if (maxDone >= 0) {
+        updateProgress(Math.min((maxDone + 1) * 100 / 6, 100));
+    }
+});
+
 // 文件选择后自动显示文件名
 document.getElementById('file-input').addEventListener('change', function() {
     const name = this.files[0] ? this.files[0].name : '未选择任何文件（支持 .txt / .docx / .md 格式）';

@@ -11,6 +11,12 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
+# Git Bash / WSL：将 SQLite 数据库指向 Windows 本机路径，避免跨文件系统锁问题
+if grep -qiE 'mingw|microsoft' /proc/version 2>/dev/null; then
+    export SCRIPT_TOOL_DATABASE_URL="sqlite:///C:/Users/${USERNAME}/script_tool.db"
+    echo ">>> 检测到跨文件系统环境，数据库路径: ${SCRIPT_TOOL_DATABASE_URL}"
+fi
+
 # 安装依赖（如果需要）
 if ! python.exe -c "import fastapi" 2>/dev/null; then
     echo ">>> 安装依赖..."
