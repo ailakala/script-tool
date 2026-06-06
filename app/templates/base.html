@@ -4,17 +4,39 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}AI 剧本创作工具{% endblock %}</title>
-    <script src="https://unpkg.com/htmx.org@2.0.0"></script>
-    <script src="https://unpkg.com/htmx.org@2.0.0/dist/ext/sse.js"></script>
+    <script src="/static/js/htmx.min.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
+    <!-- 粒子背景 -->
+    <canvas id="particle-canvas"></canvas>
+
     <nav class="navbar">
-        <a href="/" class="nav-brand">AI 剧本创作工具</a>
+        <div class="nav-left">
+            <a href="/" class="nav-brand">✦ AI 剧本创作工具</a>
+            {% if project_count is defined and project_count > 0 %}
+            <span class="nav-count">
+                {% if project_index is defined %}
+                项目 {{ project_index }}/{{ project_count }}
+                {% else %}
+                共 {{ project_count }} 个项目
+                {% endif %}
+            </span>
+            {% endif %}
+        </div>
         <a href="/projects/new" class="nav-link">新建项目</a>
     </nav>
+
     <main class="container">
         {% block content %}{% endblock %}
     </main>
+    <script>
+    fetch('/health').catch(function(){});
+    setInterval(function() {
+        fetch('/health').catch(function(){});
+    }, 3000);
+    </script>
+
+    <script src="/static/js/particles.js"></script>
 </body>
 </html>
