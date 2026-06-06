@@ -32,6 +32,34 @@ def _load_text(project_id: str) -> str:
         return p.read_text(encoding="utf-8")
     return ""
 
+
+def _render_import_result(title: str, stats: dict) -> HTMLResponse:
+    """Generate HTML status card for HTMX upload/paste responses."""
+    errors_html = ""
+    if stats.get("errors"):
+        items = "".join(f"<li>{e}</li>" for e in stats["errors"])
+        errors_html = (
+            f'<div style="margin-top:0.75em;padding:0.75em;background:#fef3c7;'
+            f'border-radius:6px;font-size:0.9em;color:#92400e">'
+            f'<strong>⚠ 警告：</strong><ul style="margin:0.25em 0 0;padding-left:1.25em">{items}</ul>'
+            f'</div>'
+        )
+
+    items_html = "".join(
+        f"<div style=\"display:flex;justify-content:space-between;padding:0.4em 0;border-bottom:1px solid #f3f4f6\">"
+        f"<span style=\"color:#6b7280\">{k}</span><strong>{v}</strong></div>"
+        for k, v in stats.get("items", [])
+    )
+
+    return HTMLResponse(content=f"""<div id="upload-result" style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:1em;margin-top:0.5em;animation:scaleIn 0.3s ease">
+<div style="display:flex;align-items:center;gap:0.5em;margin-bottom:0.75em">
+    <span style="font-size:1.5em">{stats.get("icon", "✅")}</span>
+    <strong style="font-size:1.05em;color:#166534">{title}</strong>
+</div>
+{items_html}
+{errors_html}
+</div>""")
+
 @router.post("/projects")
 async def create_project(
     request: Request,
@@ -78,7 +106,8 @@ setTimeout(function() {{
     return {"id": project.id, "title": project.title}
 
 @router.post("/projects/{project_id}/upload")
-async def upload_file(project_id: str, file: UploadFile = File(...),
+async def upload_file(project_id: str, request: Request,
+                      file: UploadFile = File(...),
                       db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -103,13 +132,26 @@ async def upload_file(project_id: str, file: UploadFile = File(...),
     # Save text so pipeline can read it later
     _save_text(project_id, text)
 
-    return {
+    resp_data = {
         "filename": filename,
         "chapters": len(result.chapters),
         "total_chars": result.total_chars,
         "title": result.title,
         "errors": result.errors,
     }
+
+    if request.headers.get("HX-Request"):
+        return _render_import_result("导入成功！", {
+            "icon": "✅",
+            "items": [
+                ("文件名", filename),
+                ("章节数", f"{len(result.chapters)} 章"),
+                ("总字数", f"{result.total_chars:,}"),
+            ],
+            "errors": result.errors,
+        })
+
+    return resp_data
 
 @router.post("/projects/{project_id}/paste")
 async def paste_text(project_id: str, request: Request,
@@ -118,8 +160,13 @@ async def paste_text(project_id: str, request: Request,
     if not project:
         raise HTTPException(404, "项目不存在")
 
-    body = await request.json()
-    text = body.get("text", "")
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        body = await request.json()
+        text = body.get("text", "")
+    else:
+        form = await request.form()
+        text = form.get("text", "")
     if len(text) > 500_000:
         raise HTTPException(400, "文本超过 50 万字上限")
 
@@ -129,13 +176,25 @@ async def paste_text(project_id: str, request: Request,
     # Save text so pipeline can read it later
     _save_text(project_id, text)
 
-    return {
+    resp_data = {
         "chapters": len(result.chapters),
         "total_chars": result.total_chars,
         "title": result.title,
         "errors": result.errors,
         "text": text,
     }
+
+    if request.headers.get("HX-Request"):
+        return _render_import_result("解析完成！", {
+            "icon": "✅",
+            "items": [
+                ("章节数", f"{len(result.chapters)} 章"),
+                ("总字数", f"{result.total_chars:,}"),
+            ],
+            "errors": result.errors,
+        })
+
+    return resp_data
 
 @router.post("/projects/{project_id}/run")
 async def run_pipeline_endpoint(project_id: str, request: Request,
