@@ -21,11 +21,21 @@ class OpenAIProvider(AIProvider):
                        output_format: str = "json") -> str:
         messages = []
         if system:
+            # 确保 prompt 包含 "JSON" 关键字（DeepSeek 等 API 要求）
+            if "json" not in system.lower():
+                system += " Output valid JSON only, no markdown wrapping."
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        response = await self._client.chat.completions.create(
-            model=self._model, messages=messages, max_tokens=4096
-        )
+
+        kwargs = {
+            "model": self._model,
+            "messages": messages,
+            "max_tokens": 16384,
+        }
+        if output_format == "json":
+            kwargs["response_format"] = {"type": "json_object"}
+
+        response = await self._client.chat.completions.create(**kwargs)
         return response.choices[0].message.content or ""
 
     async def generate_stream(self, prompt: str, system: str = "") -> AsyncIterator[str]:
@@ -34,7 +44,7 @@ class OpenAIProvider(AIProvider):
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
         stream = await self._client.chat.completions.create(
-            model=self._model, messages=messages, max_tokens=4096, stream=True
+            model=self._model, messages=messages, max_tokens=16384, stream=True
         )
         async for chunk in stream:
             if chunk.choices[0].delta.content:

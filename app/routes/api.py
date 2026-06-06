@@ -282,10 +282,12 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
         project.status = "done" if not pipeline_state.errors else "error"
         db.commit()
 
+        assembly = pipeline_state.stage_results.get("assembly")
         final_msg = {
             "status": "complete",
             "errors": pipeline_state.errors,
-            "yaml_text": pipeline_state.stage_results.get("assembly").yaml_text if pipeline_state.stage_results.get("assembly") else "",
+            "yaml_text": assembly.yaml_text if assembly else "",
+            "screenplay_text": assembly.screenplay_text if assembly else "",
         }
         yield f"data: {json.dumps(final_msg, ensure_ascii=False)}\n\n"
 
@@ -468,6 +470,7 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
         final_msg = {"status": "complete", "stage": stage}
         if stage == 5 and hasattr(result, 'yaml_text'):
             final_msg["yaml_text"] = result.yaml_text
+            final_msg["screenplay_text"] = getattr(result, 'screenplay_text', '')
         yield f"data: {json.dumps(final_msg, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -507,31 +510,51 @@ def _get_latest_cached(db: Session, project_id: str, stage: int):
     return None
 
 
-@router.get("/projects/{project_id}/script.yaml")
-async def download_script(project_id: str, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(404, "项目不存在")
-
-    # Read yaml_text from StageCache (stage 5)
+def _get_assembly_data(project_id: str, db: Session) -> dict:
+    """从 Stage 5 缓存中读取装配结果。"""
     cache_row = db.query(StageCache).filter(
         StageCache.project_id == project_id,
         StageCache.stage == 5,
     ).order_by(StageCache.created_at.desc()).first()
 
-    yaml_text = ""
     if cache_row and cache_row.output_json:
         try:
-            data = json.loads(cache_row.output_json)
-            yaml_text = data.get("yaml_text", "")
+            return json.loads(cache_row.output_json)
         except (json.JSONDecodeError, TypeError):
             pass
+    return {}
+
+
+@router.get("/projects/{project_id}/script.yaml")
+async def download_script_yaml(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    data = _get_assembly_data(project_id, db)
+    yaml_text = data.get("yaml_text", "")
 
     if not yaml_text:
         raise HTTPException(404, "剧本 YAML 尚未生成，请先运行流水线")
 
     return PlainTextResponse(yaml_text, media_type="application/x-yaml",
                              headers={"Content-Disposition": f"attachment; filename={project.title}.yaml"})
+
+
+@router.get("/projects/{project_id}/script.txt")
+async def download_script_txt(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    data = _get_assembly_data(project_id, db)
+    screenplay_text = data.get("screenplay_text", "")
+
+    if not screenplay_text:
+        raise HTTPException(404, "剧本尚未生成，请先运行流水线")
+
+    return PlainTextResponse(screenplay_text, media_type="text/plain; charset=utf-8",
+                             headers={"Content-Disposition": f"attachment; filename={project.title}.txt"})
 
 
 @router.put("/projects/{project_id}/stage/5")
@@ -543,6 +566,7 @@ async def save_edited_script(project_id: str, request: Request,
 
     body = await request.json()
     yaml_text = body.get("yaml_text", "")
+    screenplay_text = body.get("screenplay_text", "")
 
     cache_row = db.query(StageCache).filter(
         StageCache.project_id == project_id,
@@ -552,12 +576,15 @@ async def save_edited_script(project_id: str, request: Request,
     if not cache_row:
         raise HTTPException(404, "剧本尚未生成，无法保存")
 
-    # Update the yaml_text inside the cached output_json
+    # Update the text fields inside the cached output_json
     try:
         data = json.loads(cache_row.output_json)
     except (json.JSONDecodeError, TypeError):
         data = {}
-    data["yaml_text"] = yaml_text
+    if yaml_text:
+        data["yaml_text"] = yaml_text
+    if screenplay_text:
+        data["screenplay_text"] = screenplay_text
     cache_row.output_json = json.dumps(data, ensure_ascii=False)
     db.commit()
 
@@ -590,6 +617,8 @@ def _deserialize_stage_result(stage: int, data: str):
         return [GeneratedScene(**item) for item in d]
     elif stage == 5:
         from app.pipeline.stage5_assembly import AssemblyResult
+        # screenplay_text may not exist in old cached data
+        d.setdefault("screenplay_text", "")
         return AssemblyResult(**d)
     return d
 

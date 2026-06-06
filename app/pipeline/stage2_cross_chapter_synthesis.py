@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from app.ai.interface import AIProvider
 from app.ai.factory import create_ai_provider
 from app.pipeline.stage1_chapter_analysis import ChapterAnalysis
+from app.pipeline.utils import extract_json
 
 @dataclass
 class GlobalAnalysis:
@@ -57,17 +58,11 @@ async def synthesize(chapter_analyses: list, provider: AIProvider = None) -> Glo
 
 def _parse_global(response: str) -> GlobalAnalysis:
     result = GlobalAnalysis(raw_response=response)
-    try:
-        text = response.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            text = "\n".join(lines[1:-1])
-        data = json.loads(text)
+    data = extract_json(response)
+    if data:
         result.characters = data.get("characters", [])
         result.relationships = data.get("relationships", [])
         result.locations = data.get("locations", [])
         result.main_plot = data.get("main_plot", "")
         result.subplots = data.get("subplots", [])
-    except (json.JSONDecodeError, KeyError):
-        pass
     return result

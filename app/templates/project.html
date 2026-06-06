@@ -62,7 +62,8 @@
     <div class="panel" id="result-panel">
         <h2>3. 查看结果</h2>
         <a href="/projects/{{ project.id }}/script">查看/编辑剧本</a>
-        <button onclick="downloadYAML()" style="margin-left:1em">下载 YAML</button>
+        <button onclick="downloadScript()" style="margin-left:1em">下载 TXT 剧本</button>
+        <button onclick="downloadYAML()" style="margin-left:0.5em">下载 YAML</button>
     </div>
 </div>
 
@@ -144,8 +145,8 @@ async function runPipeline() {
             if (msg.errors && msg.errors.length > 0) {
                 alert('完成，但有错误:\n' + msg.errors.join('\n'));
             }
-            if (msg.yaml_text) {
-                showYAML(msg.yaml_text);
+            if (msg.screenplay_text || msg.yaml_text) {
+                showResult(msg.screenplay_text || msg.yaml_text);
             }
         }
     });
@@ -208,10 +209,10 @@ async function runNextStage() {
                 // Done
                 setButtons(false);
                 reviewPanel.style.display = 'none';
-                // Load YAML into result panel
+                // Load result into result panel
                 fetch('/api/projects/{{ project.id }}/stage/5')
                     .then(r => r.json())
-                    .then(d => { if (d.data && d.data.yaml_text) showYAML(d.data.yaml_text); });
+                    .then(d => { if (d.data) showResult(d.data.screenplay_text || d.data.yaml_text || ''); });
             }
         }
         if (msg.status === 'error') {
@@ -226,15 +227,19 @@ async function runNextStage() {
     }
 }
 
-function showYAML(yamlText) {
+function showResult(text) {
     const panel = document.getElementById('result-panel');
-    const existing = document.getElementById('yaml-preview');
+    const existing = document.getElementById('script-preview');
     if (existing) existing.remove();
     const pre = document.createElement('pre');
-    pre.id = 'yaml-preview';
-    pre.style.cssText = 'max-height:400px;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:4px;margin-top:0.5em;';
-    pre.textContent = yamlText.substring(0, 3000);
+    pre.id = 'script-preview';
+    pre.style.cssText = 'max-height:400px;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:4px;margin-top:0.5em;white-space:pre-wrap;font-size:0.9em;line-height:1.6';
+    pre.textContent = text.substring(0, 5000);
     panel.appendChild(pre);
+}
+
+function downloadScript() {
+    window.open('/api/projects/{{ project.id }}/script.txt', '_blank');
 }
 
 function downloadYAML() {

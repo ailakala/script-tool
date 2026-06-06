@@ -154,7 +154,7 @@ async def run_stage_5(project_id: str, meta: dict, config: dict,
 
     async def _run():
         if notify:
-            await notify("正在组装和校验 YAML...")
+            await notify("正在组装剧本并校验...")
         return assemble(meta, config, global_analysis, structure, scenes)
 
     result = await _cache_or_run(cache_get, cache_put, project_id, 5, s5_hash, _run)
