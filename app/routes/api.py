@@ -2,12 +2,13 @@ import json
 import asyncio
 from dataclasses import asdict
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse, PlainTextResponse
+from fastapi.responses import StreamingResponse, PlainTextResponse, HTMLResponse
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import Project, PipelineRun, StageCache
 from app.pipeline.executor import (run_pipeline, compute_input_hash,
     run_stage_0, run_stage_1, run_stage_2, run_stage_3, run_stage_4, run_stage_5)
+from app.config import TEXT_STORE_DIR
 from app.pipeline.stage0_preprocess import PreprocessResult, Chapter
 from app.pipeline.stage1_chapter_analysis import ChapterAnalysis
 from app.pipeline.stage2_cross_chapter_synthesis import GlobalAnalysis
@@ -16,8 +17,52 @@ from app.pipeline.stage4_scene_generation import GeneratedScene
 
 router = APIRouter(prefix="/api")
 
+
+def _text_path(project_id: str) -> str:
+    return TEXT_STORE_DIR / f"{project_id}.txt"
+
+
+def _save_text(project_id: str, text: str):
+    _text_path(project_id).write_text(text, encoding="utf-8")
+
+
+def _load_text(project_id: str) -> str:
+    p = _text_path(project_id)
+    if p.exists():
+        return p.read_text(encoding="utf-8")
+    return ""
+
+
+def _render_import_result(title: str, stats: dict) -> HTMLResponse:
+    """Generate HTML status card for HTMX upload/paste responses."""
+    errors_html = ""
+    if stats.get("errors"):
+        items = "".join(f"<li>{e}</li>" for e in stats["errors"])
+        errors_html = (
+            f'<div style="margin-top:0.75em;padding:0.75em;background:#fef3c7;'
+            f'border-radius:6px;font-size:0.9em;color:#92400e">'
+            f'<strong>⚠ 警告：</strong><ul style="margin:0.25em 0 0;padding-left:1.25em">{items}</ul>'
+            f'</div>'
+        )
+
+    items_html = "".join(
+        f"<div style=\"display:flex;justify-content:space-between;padding:0.4em 0;border-bottom:1px solid #f3f4f6\">"
+        f"<span style=\"color:#6b7280\">{k}</span><strong>{v}</strong></div>"
+        for k, v in stats.get("items", [])
+    )
+
+    return HTMLResponse(content=f"""<div id="upload-result" style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:1em;margin-top:0.5em;animation:scaleIn 0.3s ease">
+<div style="display:flex;align-items:center;gap:0.5em;margin-bottom:0.75em">
+    <span style="font-size:1.5em">{stats.get("icon", "✅")}</span>
+    <strong style="font-size:1.05em;color:#166534">{title}</strong>
+</div>
+{items_html}
+{errors_html}
+</div>""")
+
 @router.post("/projects")
 async def create_project(
+    request: Request,
     title: str = Form(...),
     source_novel: str = Form(""),
     source_author: str = Form(""),
@@ -32,10 +77,37 @@ async def create_project(
     db.add(project)
     db.commit()
     db.refresh(project)
+
+    # HTMX request → return HTML modal fragment
+    if request.headers.get("HX-Request"):
+        return HTMLResponse(content=f"""<div id="create-modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;animation:fadeIn 0.2s ease">
+<div id="create-modal" style="background:#fff;border-radius:12px;padding:2em;text-align:center;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,0.3);animation:scaleIn 0.3s ease">
+<img src="https://media.tenor.com/WQ3LQ6sUkQcAAAAi/peach-goma-pc.gif" alt="celebrate" style="width:120px;height:120px;border-radius:12px;margin-bottom:0.5em">
+<h2 style="margin:0.5em 0;font-size:1.2em">项目创建成功！🎉</h2>
+<p style="color:#6b7280;margin-bottom:1.5em">「{title}」已就绪</p>
+<div style="display:flex;gap:0.5em;justify-content:center">
+<a href="/projects/{project.id}" style="display:inline-block;padding:0.5em 1.25em;background:var(--accent, #2563eb);color:#fff;border-radius:6px;text-decoration:none;font-size:0.95em">前往项目工作台</a>
+<button onclick="document.getElementById('create-modal-overlay').remove()" style="padding:0.5em 1.25em;background:#e5e7eb;color:#1a1a1a;border:none;border-radius:6px;cursor:pointer;font-size:0.95em">✕ 关闭</button>
+</div>
+</div>
+</div>
+<script>
+setTimeout(function() {{
+    var overlay = document.getElementById('create-modal-overlay');
+    if (overlay) {{
+        overlay.style.transition = 'opacity 0.3s';
+        overlay.style.opacity = '0';
+        setTimeout(function() {{ if (overlay.parentNode) overlay.remove(); }}, 300);
+    }}
+}}, 3000);
+</script>
+""")
+
     return {"id": project.id, "title": project.title}
 
 @router.post("/projects/{project_id}/upload")
-async def upload_file(project_id: str, file: UploadFile = File(...),
+async def upload_file(project_id: str, request: Request,
+                      file: UploadFile = File(...),
                       db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -47,6 +119,7 @@ async def upload_file(project_id: str, file: UploadFile = File(...),
     if filename.endswith(".docx"):
         from app.pipeline.stage0_preprocess import preprocess_docx
         result = preprocess_docx(content)
+        text = ""
     elif filename.endswith(".md"):
         text = content.decode("utf-8", errors="replace")
         from app.pipeline.stage0_preprocess import preprocess_markdown
@@ -56,13 +129,29 @@ async def upload_file(project_id: str, file: UploadFile = File(...),
         from app.pipeline.stage0_preprocess import preprocess_text
         result = preprocess_text(text)
 
-    return {
+    # Save text so pipeline can read it later
+    _save_text(project_id, text)
+
+    resp_data = {
         "filename": filename,
         "chapters": len(result.chapters),
         "total_chars": result.total_chars,
         "title": result.title,
         "errors": result.errors,
     }
+
+    if request.headers.get("HX-Request"):
+        return _render_import_result("导入成功！", {
+            "icon": "✅",
+            "items": [
+                ("文件名", filename),
+                ("章节数", f"{len(result.chapters)} 章"),
+                ("总字数", f"{result.total_chars:,}"),
+            ],
+            "errors": result.errors,
+        })
+
+    return resp_data
 
 @router.post("/projects/{project_id}/paste")
 async def paste_text(project_id: str, request: Request,
@@ -71,21 +160,50 @@ async def paste_text(project_id: str, request: Request,
     if not project:
         raise HTTPException(404, "项目不存在")
 
-    body = await request.json()
-    text = body.get("text", "")
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        body = await request.json()
+        text = body.get("text", "")
+    else:
+        form = await request.form()
+        text = form.get("text", "")
     if len(text) > 500_000:
         raise HTTPException(400, "文本超过 50 万字上限")
 
     from app.pipeline.stage0_preprocess import preprocess_text
     result = preprocess_text(text)
 
-    return {
+    # Save text so pipeline can read it later
+    _save_text(project_id, text)
+
+    resp_data = {
         "chapters": len(result.chapters),
         "total_chars": result.total_chars,
         "title": result.title,
         "errors": result.errors,
         "text": text,
     }
+
+    if request.headers.get("HX-Request"):
+        return _render_import_result("解析完成！", {
+            "icon": "✅",
+            "items": [
+                ("章节数", f"{len(result.chapters)} 章"),
+                ("总字数", f"{result.total_chars:,}"),
+            ],
+            "errors": result.errors,
+        })
+
+    return resp_data
+
+
+@router.get("/projects/{project_id}/text")
+async def get_text(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    text = _load_text(project_id)
+    return {"text": text, "project_id": project_id}
 
 @router.post("/projects/{project_id}/run")
 async def run_pipeline_endpoint(project_id: str, request: Request,
@@ -95,7 +213,9 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
         raise HTTPException(404, "项目不存在")
 
     body = await request.json()
-    text = body.get("text", "")
+    text = body.get("text", "") or _load_text(project_id)
+    if text:
+        _save_text(project_id, text)
     if not text:
         raise HTTPException(400, "请先上传或粘贴小说文本")
 
@@ -163,6 +283,7 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
         while not task.done() or not queue.empty():
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=0.5)
+                _inject_percent(msg)
                 yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
             except asyncio.TimeoutError:
                 yield ": keepalive\n\n"
@@ -172,10 +293,12 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
         project.status = "done" if not pipeline_state.errors else "error"
         db.commit()
 
+        assembly = pipeline_state.stage_results.get("assembly")
         final_msg = {
             "status": "complete",
             "errors": pipeline_state.errors,
-            "yaml_text": pipeline_state.stage_results.get("assembly").yaml_text if pipeline_state.stage_results.get("assembly") else "",
+            "yaml_text": assembly.yaml_text if assembly else "",
+            "screenplay_text": assembly.screenplay_text if assembly else "",
         }
         yield f"data: {json.dumps(final_msg, ensure_ascii=False)}\n\n"
 
@@ -218,7 +341,9 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
 
     run_id = run.id  # save before detach
     body_data = await request.json()
-    input_text = body_data.get("text", "")
+    input_text = body_data.get("text", "") or _load_text(project_id)
+    if input_text:
+        _save_text(project_id, input_text)
 
     async def event_stream():
         queue: asyncio.Queue = asyncio.Queue()
@@ -273,7 +398,7 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
                     raise ValueError("请先运行 Stage 0")
                 if not input_text:
                     raise ValueError("请提供小说文本")
-                return await run_stage_1(project_id, input_text, s0.chapters, provider, notify, cache_get, cache_put)
+                return await run_stage_1(project_id, input_text, s0.chapters, provider, notify, None, cache_get, cache_put)
 
             elif stage == 2:
                 s1 = _get_latest_cached(db, project_id, 1)
@@ -294,8 +419,8 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
                 if s2 is None or s3 is None or s0 is None:
                     raise ValueError("请先运行 Stage 0-3")
                 chapter_texts = {ch.index: ch.content for ch in s0.chapters}
-                return await run_stage_4(project_id, s3, s2.characters, chapter_texts,
-                                         provider, notify, cache_get, cache_put)
+                return await run_stage_4(project_id, s3, s2.characters, chapter_texts, None,
+                                         provider, notify, None, cache_get, cache_put)
 
             elif stage == 5:
                 s2 = _get_latest_cached(db, project_id, 2)
@@ -313,6 +438,7 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
         while not task.done() or not queue.empty():
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=0.5)
+                _inject_percent(msg)
                 yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
             except asyncio.TimeoutError:
                 yield ": keepalive\n\n"
@@ -357,6 +483,7 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
         final_msg = {"status": "complete", "stage": stage}
         if stage == 5 and hasattr(result, 'yaml_text'):
             final_msg["yaml_text"] = result.yaml_text
+            final_msg["screenplay_text"] = getattr(result, 'screenplay_text', '')
         yield f"data: {json.dumps(final_msg, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -396,14 +523,104 @@ def _get_latest_cached(db: Session, project_id: str, stage: int):
     return None
 
 
+def _get_assembly_data(project_id: str, db: Session) -> dict:
+    """从 Stage 5 缓存中读取装配结果。"""
+    cache_row = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == 5,
+    ).order_by(StageCache.created_at.desc()).first()
+
+    if cache_row and cache_row.output_json:
+        try:
+            return json.loads(cache_row.output_json)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {}
+
+
 @router.get("/projects/{project_id}/script.yaml")
-async def download_script(project_id: str, yaml_text: str = "",
-                          db: Session = Depends(get_db)):
+async def download_script_yaml(project_id: str, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(404, "项目不存在")
+
+    data = _get_assembly_data(project_id, db)
+    yaml_text = data.get("yaml_text", "")
+
+    if not yaml_text:
+        raise HTTPException(404, "剧本 YAML 尚未生成，请先运行流水线")
+
     return PlainTextResponse(yaml_text, media_type="application/x-yaml",
                              headers={"Content-Disposition": f"attachment; filename={project.title}.yaml"})
+
+
+@router.get("/projects/{project_id}/script.txt")
+async def download_script_txt(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    data = _get_assembly_data(project_id, db)
+    screenplay_text = data.get("screenplay_text", "")
+
+    # 兼容旧缓存：如果没有 screenplay_text，尝试从 yaml_text 提取 scene_text 拼凑
+    if not screenplay_text:
+        yaml_text = data.get("yaml_text", "")
+        if not yaml_text:
+            raise HTTPException(404, "剧本尚未生成，请先运行流水线")
+        # 从 YAML 中提取 scene_text 作为兜底
+        import yaml as _yaml
+        try:
+            parsed = _yaml.safe_load(yaml_text)
+            texts = []
+            for scene in parsed.get("scenes", []):
+                st = scene.get("scene_text", "")
+                if st:
+                    texts.append(st)
+            if texts:
+                screenplay_text = "标题：《" + project.title + "》\n\n" + "\n\n".join(texts) + "\n\n剧终"
+            else:
+                screenplay_text = yaml_text  # 实在没有就用 YAML 原文
+        except Exception:
+            screenplay_text = yaml_text
+
+    return PlainTextResponse(screenplay_text, media_type="text/plain; charset=utf-8",
+                             headers={"Content-Disposition": f"attachment; filename={project.title}.txt"})
+
+
+@router.put("/projects/{project_id}/stage/5")
+async def save_edited_script(project_id: str, request: Request,
+                              db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    body = await request.json()
+    yaml_text = body.get("yaml_text", "")
+    screenplay_text = body.get("screenplay_text", "")
+
+    cache_row = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == 5,
+    ).order_by(StageCache.created_at.desc()).first()
+
+    if not cache_row:
+        raise HTTPException(404, "剧本尚未生成，无法保存")
+
+    # Update the text fields inside the cached output_json
+    try:
+        data = json.loads(cache_row.output_json)
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    if yaml_text:
+        data["yaml_text"] = yaml_text
+    if screenplay_text:
+        data["screenplay_text"] = screenplay_text
+    cache_row.output_json = json.dumps(data, ensure_ascii=False)
+    db.commit()
+
+    return {"status": "saved"}
+
 
 # ── Cache helpers ────────────────────────────────────────────────────
 
@@ -431,6 +648,8 @@ def _deserialize_stage_result(stage: int, data: str):
         return [GeneratedScene(**item) for item in d]
     elif stage == 5:
         from app.pipeline.stage5_assembly import AssemblyResult
+        # screenplay_text may not exist in old cached data
+        d.setdefault("screenplay_text", "")
         return AssemblyResult(**d)
     return d
 
@@ -471,3 +690,27 @@ async def delete_project(project_id: str, db: Session = Depends(get_db)):
     db.delete(project)
     db.commit()
     return {"deleted": project_id}
+
+
+def _inject_percent(msg: dict):
+    """Add percent field based on completed stages.
+
+    如果 executor 已经设置了细粒度的 percent 字段，直接使用；
+    否则回退到旧的阶段计数方式（每阶段 16.67%）。
+    """
+    # 新系统已在 executor 中设置了 percent，无需覆盖
+    if "percent" in msg:
+        return
+
+    stage_status = msg.get("stage_status", {})
+    if stage_status:
+        done = sum(1 for v in stage_status.values() if v == "done")
+        current = msg.get("current_stage", -1)
+        if done == 0 and current >= 0:
+            # Step-by-step mode: only current stage in status, assume previous stages done
+            msg["percent"] = min(current * 100 // 6, 100)
+        else:
+            msg["percent"] = min(done * 100 // 6, 100)
+    elif msg.get("status") == "complete" and "stage" in msg:
+        # Single-stage completion message
+        msg["percent"] = (msg["stage"] + 1) * 100 // 6
