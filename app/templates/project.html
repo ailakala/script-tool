@@ -5,13 +5,16 @@
 <div class="workspace">
     <div class="panel" id="upload-panel">
         <h2>1. 导入小说</h2>
-        <form hx-encoding="multipart/form-data" hx-post="/api/projects/{{ project.id }}/upload" hx-target="#upload-result">
-            <input type="file" name="file" accept=".txt,.docx,.md">
-            <button type="submit">上传文件</button>
+        <form hx-encoding="multipart/form-data" hx-post="/api/projects/{{ project.id }}/upload" hx-target="#upload-result" hx-trigger="change from:#file-input">
+            <div class="file-input-wrapper">
+                <input type="file" name="file" id="file-input" accept=".txt,.docx,.md" style="display:none">
+                <button type="button" class="file-select-btn" onclick="document.getElementById('file-input').click()">选择文件</button>
+                <span id="file-name" class="file-name-text">未选择任何文件（支持 .txt / .docx / .md 格式）</span>
+            </div>
         </form>
         <hr>
-        <textarea name="text" placeholder="或直接粘贴小说文本..." rows="10" style="width:100%"></textarea>
-        <button hx-post="/api/projects/{{ project.id }}/paste" hx-include="previous textarea" hx-target="#upload-result">解析文本</button>
+        <textarea name="text" id="paste-text" placeholder="或直接粘贴小说文本..." rows="10" style="width:100%"></textarea>
+        <button hx-post="/api/projects/{{ project.id }}/paste" hx-include="#paste-text" hx-target="#upload-result">解析文本</button>
         <div id="upload-result"></div>
     </div>
 
@@ -20,6 +23,22 @@
         <div style="display:flex;gap:0.5em;margin-bottom:1em">
             <button id="run-btn" onclick="runPipeline()">一键生成</button>
             <button id="step-btn" onclick="runStepByStep()">分步生成</button>
+        </div>
+        <div id="progress-bar-container" style="margin-bottom:0.75em;display:none">
+            <div style="display:flex;align-items:center;gap:0.5em">
+                <progress id="progress-bar" value="0" max="100" style="flex:1"></progress>
+                <span id="progress-percent" style="font-weight:700;min-width:3em;text-align:right">0%</span>
+            </div>
+        </div>
+        <div id="completion-toast" style="display:none;position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:10000;background:#fff;border-radius:12px;padding:1em 1.5em;box-shadow:0 10px 40px rgba(0,0,0,0.2);animation:slideDown 0.4s ease">
+            <div style="display:flex;align-items:center;gap:0.75em">
+                <span style="font-size:2em">🎉</span>
+                <div>
+                    <strong style="font-size:1.1em">剧本生成完成！</strong>
+                    <p style="margin:0.25em 0 0;color:#6b7280;font-size:0.9em">全部 6 个阶段已处理完毕</p>
+                </div>
+                <button onclick="closeCompletionToast()" style="background:none;border:none;font-size:1.2em;cursor:pointer;color:#9ca3af;padding:0 0.25em;margin-left:0.5em">✕</button>
+            </div>
         </div>
         <div id="progress">
             <div id="stage-0" class="stage">Stage 0: 文本预处理</div>
@@ -51,6 +70,49 @@
 let _nextStage = 1;
 let _stepMode = false;
 
+// ── Page load: restore saved state ──────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', async function() {
+    // Restore saved input text
+    try {
+        const res = await fetch('/api/projects/{{ project.id }}/text');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.text) {
+                const textarea = document.querySelector('textarea[name="text"]');
+                if (textarea) textarea.value = data.text;
+            }
+        }
+    } catch(e) { /* network or parse error — textarea stays empty */ }
+
+    // Restore stage results and progress
+    let maxDone = -1;
+    for (let s = 0; s <= 5; s++) {
+        try {
+            const res = await fetch('/api/projects/{{ project.id }}/stage/' + s);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.status === 'cached') {
+                    updateStage(s, 'done', '');
+                    maxDone = Math.max(maxDone, s);
+                    if (s === 5 && data.data && data.data.yaml_text) {
+                        showYAML(data.data.yaml_text);
+                    }
+                }
+            }
+        } catch(e) { /* skip stages that haven't been run */ }
+    }
+    if (maxDone >= 0) {
+        updateProgress(Math.min((maxDone + 1) * 100 / 6, 100));
+    }
+});
+
+// 文件选择后自动显示文件名
+document.getElementById('file-input').addEventListener('change', function() {
+    const name = this.files[0] ? this.files[0].name : '未选择任何文件（支持 .txt / .docx / .md 格式）';
+    document.getElementById('file-name').textContent = name;
+});
+
 function getText() {
     const textarea = document.querySelector('textarea[name="text"]');
     return textarea ? textarea.value : '';
@@ -67,6 +129,16 @@ function updateStage(stage, status, message) {
         if (message) el.textContent = 'Stage ' + stage + ': ' + message;
         el.className = 'stage ' + status;
     }
+}
+
+function updateProgress(percent) {
+    const bar = document.getElementById('progress-bar');
+    const pct = document.getElementById('progress-percent');
+    const container = document.getElementById('progress-bar-container');
+    if (container) container.style.display = 'block';
+    if (bar) bar.value = percent;
+    if (pct) pct.textContent = percent + '%';
+    if (percent >= 100 && bar) bar.style.accentColor = '#10b981';
 }
 
 async function streamSSE(url, onMessage) {
@@ -101,6 +173,7 @@ async function runPipeline() {
     document.getElementById('review-panel').style.display = 'none';
 
     const ok = await streamSSE('/api/projects/{{ project.id }}/run', function(msg) {
+        if (msg.percent !== undefined) updateProgress(msg.percent);
         if (msg.message && msg.current_stage !== undefined) {
             updateStage(msg.current_stage, msg.stage_status[msg.current_stage], msg.message);
         }
@@ -150,6 +223,7 @@ async function runNextStage() {
     reviewPanel.style.display = 'none';
 
     const ok = await streamSSE('/api/projects/{{ project.id }}/run-stage/' + stage, function(msg) {
+        if (msg.percent !== undefined) updateProgress(msg.percent);
         if (msg.message) {
             updateStage(stage, 'running', msg.message);
         }
