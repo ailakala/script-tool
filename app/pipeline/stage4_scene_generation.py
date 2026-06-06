@@ -157,4 +157,17 @@ def _parse_scene(plan: ScenePlan, response: str) -> GeneratedScene:
     if data:
         scene.scene_heading = data.get("scene_heading", "")
         scene.content = data.get("content", [])
+
+    # 校验：content 为空时输出诊断信息
+    if not scene.content:
+        if not response or not response.strip():
+            print(f"[_parse_scene] WARNING: {plan.id} AI 返回了空响应")
+        elif not data:
+            print(f"[_parse_scene] WARNING: {plan.id} JSON 解析失败，content 为空")
+            print(f"[_parse_scene] raw_response 前 500 字符：\n{response[:500]}")
+        else:
+            print(f"[_parse_scene] WARNING: {plan.id} JSON 解析成功但 content 数组为空")
+            print(f"[_parse_scene] 解析出的 key: {list(data.keys())}")
+            print(f"[_parse_scene] raw_response 前 500 字符：\n{response[:500]}")
+
     return scene
