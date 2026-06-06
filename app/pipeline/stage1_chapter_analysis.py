@@ -50,11 +50,23 @@ async def analyze_chapter(chapter: Chapter, provider: AIProvider = None) -> Chap
     return _parse_response(chapter.index, chapter.title, response)
 
 
-async def analyze_chapters_parallel(chapters: list, provider: AIProvider = None) -> list:
+async def analyze_chapters_parallel(chapters: list, provider: AIProvider = None,
+                                   on_chapter_done=None) -> list:
     if provider is None:
         provider = create_ai_provider()
     tasks = [analyze_chapter(c, provider) for c in chapters]
-    return await asyncio.gather(*tasks)
+
+    # 使用 as_completed 实现逐章进度回调
+    results = []
+    for coro in asyncio.as_completed(tasks):
+        result = await coro
+        results.append(result)
+        if on_chapter_done:
+            await on_chapter_done()
+
+    # 按章节索引排序，确保顺序一致
+    results.sort(key=lambda r: r.chapter_index)
+    return results
 
 
 def _parse_response(index: int, title: str, response: str) -> ChapterAnalysis:

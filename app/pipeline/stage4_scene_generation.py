@@ -96,7 +96,8 @@ async def generate_scene(plan: ScenePlan, characters: list,
 async def generate_scenes_parallel(plans: list, characters: list,
                                    chapter_texts: dict,
                                    chapter_analyses: list = None,
-                                   provider: AIProvider = None) -> list:
+                                   provider: AIProvider = None,
+                                   on_scene_done=None) -> list:
     if provider is None:
         provider = create_ai_provider()
 
@@ -116,7 +117,18 @@ async def generate_scenes_parallel(plans: list, characters: list,
         )
         for p in plans
     ]
-    return await asyncio.gather(*tasks)
+
+    # 使用 as_completed 实现逐场进度回调
+    results = []
+    for coro in asyncio.as_completed(tasks):
+        result = await coro
+        results.append(result)
+        if on_scene_done:
+            await on_scene_done()
+
+    # 按 scene id 排序，确保顺序一致
+    results.sort(key=lambda r: r.sequence)
+    return results
 
 
 def _parse_scene(plan: ScenePlan, response: str) -> GeneratedScene:

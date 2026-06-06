@@ -633,7 +633,15 @@ async def delete_project(project_id: str, db: Session = Depends(get_db)):
 
 
 def _inject_percent(msg: dict):
-    """Add percent field based on completed stages."""
+    """Add percent field based on completed stages.
+
+    如果 executor 已经设置了细粒度的 percent 字段，直接使用；
+    否则回退到旧的阶段计数方式（每阶段 16.67%）。
+    """
+    # 新系统已在 executor 中设置了 percent，无需覆盖
+    if "percent" in msg:
+        return
+
     stage_status = msg.get("stage_status", {})
     if stage_status:
         done = sum(1 for v in stage_status.values() if v == "done")
