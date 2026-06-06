@@ -134,9 +134,16 @@ async def run_stage_4(project_id: str, structure: ScriptStructure,
     async def _run():
         if notify:
             await notify(f"正在生成 {len(structure.scenes)} 场内容...")
-        return await generate_scenes_parallel(
+        result = await generate_scenes_parallel(
             structure.scenes, characters, chapter_texts, chapter_analyses, provider, on_scene_done
         )
+        empty = [s for s in result if not s.content]
+        if empty and result:
+            names = ", ".join(s.id for s in empty)
+            raise ValueError(
+                f"{len(empty)}/{len(result)} 个场景内容为空（{names}）。AI 返回异常，请重试。"
+            )
+        return result
 
     return await _cache_or_run(cache_get, cache_put, project_id, 4, s4_hash, _run)
 
@@ -251,6 +258,14 @@ async def run_pipeline(project_id: str, text: str, meta: dict, config: dict,
         state.stage_results["scenes"] = scenes
         state.set_stage(4, StageStatus.DONE)
         state.percent = s4_base + STAGE_WEIGHTS[4]  # 95%
+
+        empty_scenes = [s for s in scenes if not s.content]
+        if empty_scenes and n_scenes > 0:
+            names = ", ".join(s.id for s in empty_scenes)
+            raise ValueError(
+                f"{len(empty_scenes)}/{n_scenes} 个场景内容为空（{names}）。"
+                f" 请删除项目重建，或联系开发者检查 AI 响应。"
+            )
         await notify(f"{n_scenes} 场内容生成完成")
 
         # Stage 5: 组装 & 校验

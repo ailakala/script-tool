@@ -428,6 +428,13 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
                 s4 = _get_latest_cached(db, project_id, 4)
                 if s2 is None or s3 is None or s4 is None:
                     raise ValueError("请先运行 Stage 0-4")
+                empty_scenes = [s for s in s4 if not s.content]
+                if empty_scenes:
+                    names = ", ".join(s.id for s in empty_scenes)
+                    raise ValueError(
+                        f"{len(empty_scenes)}/{len(s4)} 个场景内容为空（{names}）。"
+                        f" 请清除 Stage 4 缓存后重试。"
+                    )
                 return await run_stage_5(project_id, meta, config, s2, s3, s4,
                                          notify, cache_get, cache_put)
 
@@ -690,6 +697,21 @@ async def delete_project(project_id: str, db: Session = Depends(get_db)):
     db.delete(project)
     db.commit()
     return {"deleted": project_id}
+
+
+@router.post("/projects/{project_id}/clear-cache")
+async def clear_cache(project_id: str, stage: int = None,
+                       db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    q = db.query(StageCache).filter(StageCache.project_id == project_id)
+    if stage is not None:
+        q = q.filter(StageCache.stage == stage)
+    count = q.count()
+    q.delete()
+    db.commit()
+    return {"cleared": count, "stage": stage}
 
 
 def _inject_percent(msg: dict):
