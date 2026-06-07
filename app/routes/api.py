@@ -92,14 +92,36 @@ async def create_project(
 
     # HTMX request → return HTML modal fragment
     if request.headers.get("HX-Request"):
+        # 内联 SVG 庆祝动画 — 不依赖外部资源
         return HTMLResponse(content=f"""<div id="create-modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;animation:fadeIn 0.2s ease">
-<div id="create-modal" style="background:#fff;border-radius:12px;padding:2em;text-align:center;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,0.3);animation:scaleIn 0.3s ease">
-<img src="https://media.tenor.com/WQ3LQ6sUkQcAAAAi/peach-goma-pc.gif" alt="celebrate" style="width:120px;height:120px;border-radius:12px;margin-bottom:0.5em">
-<h2 style="margin:0.5em 0;font-size:1.2em">项目创建成功！🎉</h2>
-<p style="color:#6b7280;margin-bottom:1.5em">「{title}」已就绪</p>
+<div id="create-modal" style="background:linear-gradient(145deg,#1a1a35,#1f1f40);border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:2em;text-align:center;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.5),0 0 40px rgba(99,102,241,0.15);animation:scaleIn 0.3s ease">
+<div style="margin-bottom:0.75em;display:flex;justify-content:center">
+    <svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <linearGradient id="checkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#6366f1"/>
+                <stop offset="100%" style="stop-color:#8b5cf6"/>
+            </linearGradient>
+            <filter id="glow">
+                <feGaussianBlur stdDeviation="2" result="blur"/>
+                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+        </defs>
+        <circle cx="50" cy="50" r="48" fill="none" stroke="url(#checkGrad)" stroke-width="3" opacity="0.3">
+            <animate attributeName="r" values="48;52;48" dur="2s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="0.3;0.6;0.3" dur="2s" repeatCount="indefinite"/>
+        </circle>
+        <circle cx="50" cy="50" r="42" fill="rgba(99,102,241,0.1)"/>
+        <path d="M35 52 L45 62 L65 40" fill="none" stroke="url(#checkGrad)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+            <animate attributeName="stroke-dasharray" values="0,100;100,0" dur="0.6s" fill="freeze"/>
+        </path>
+    </svg>
+</div>
+<h2 style="margin:0.25em 0;font-size:1.25em;color:#e8e8f0">项目创建成功！🎉</h2>
+<p style="color:#a0a0b8;margin-bottom:1.5em;font-size:0.95em">「{title}」已就绪</p>
 <div style="display:flex;gap:0.5em;justify-content:center">
-<a href="/projects/{project.id}" style="display:inline-block;padding:0.5em 1.25em;background:var(--accent, #2563eb);color:#fff;border-radius:6px;text-decoration:none;font-size:0.95em">前往项目工作台</a>
-<button onclick="document.getElementById('create-modal-overlay').remove()" style="padding:0.5em 1.25em;background:#e5e7eb;color:#1a1a1a;border:none;border-radius:6px;cursor:pointer;font-size:0.95em">✕ 关闭</button>
+<a href="/projects/{project.id}" style="display:inline-flex;align-items:center;gap:0.3em;padding:0.55em 1.25em;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-radius:8px;text-decoration:none;font-size:0.95em;font-weight:600">🚀 前往项目工作台</a>
+<button onclick="document.getElementById('create-modal-overlay').remove()" style="padding:0.55em 1.25em;background:rgba(255,255,255,0.06);color:#a0a0b8;border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-size:0.95em">✕ 关闭</button>
 </div>
 </div>
 </div>
@@ -111,7 +133,7 @@ setTimeout(function() {{
         overlay.style.opacity = '0';
         setTimeout(function() {{ if (overlay.parentNode) overlay.remove(); }}, 300);
     }}
-}}, 3000);
+}}, 4000);
 </script>
 """)
 
@@ -771,6 +793,386 @@ async def clear_cache(project_id: str, stage: int = None,
     q.delete()
     db.commit()
     return {"cleared": count, "stage": stage}
+
+
+# ── Stage 3 场景编排 API ──────────────────────────────────────────
+
+def _renumber_scenes(scenes_data: list) -> list:
+    """按 episode 分组后自动重新编号 sequence 和 id。"""
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for s in scenes_data:
+        ep = s.get("episode", 1) if isinstance(s, dict) else getattr(s, "episode", 1)
+        groups[ep].append(s)
+
+    result = []
+    global_seq = 1
+    for ep in sorted(groups):
+        for i, s in enumerate(groups[ep], 1):
+            if isinstance(s, dict):
+                s["sequence"] = i
+                s["id"] = f"scene_{global_seq:03d}"
+            else:
+                s.sequence = i
+                s.id = f"scene_{global_seq:03d}"
+            global_seq += 1
+            result.append(s)
+    return result
+
+
+@router.get("/projects/{project_id}/scenes")
+async def get_scenes(project_id: str, db: Session = Depends(get_db)):
+    """返回 Stage 3 场景列表 JSON，供看板使用。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    structure = _get_latest_cached(db, project_id, 3)
+    if structure is None:
+        return {"script_type": project.script_type, "scenes": [], "episode_summaries": []}
+
+    scenes_data = [asdict(s) for s in structure.scenes]
+    return {
+        "script_type": structure.script_type,
+        "scenes": scenes_data,
+        "episode_summaries": structure.episode_summaries,
+        "beat_sheet": structure.beat_sheet,
+    }
+
+
+@router.put("/projects/{project_id}/scenes")
+async def save_scenes(project_id: str, request: Request, db: Session = Depends(get_db)):
+    """保存完整的场景列表（原子操作），自动重新编号。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    body = await request.json()
+    incoming_scenes = body.get("scenes", [])
+
+    # 自动重新编号
+    renumbered = _renumber_scenes(incoming_scenes)
+
+    # 查找 Stage 3 缓存行
+    cache_row = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == 3,
+    ).order_by(StageCache.created_at.desc()).first()
+
+    if not cache_row:
+        # 如果没有缓存，创建一个新的（罕见但安全处理）
+        cache_row = StageCache(project_id=project_id, stage=3, input_hash="manual")
+        db.add(cache_row)
+
+    # 重建 ScriptStructure
+    structure = _get_latest_cached(db, project_id, 3)
+    if structure is None:
+        structure = ScriptStructure(script_type=project.script_type)
+
+    structure.scenes = [ScenePlan(**s) for s in renumbered]
+    # 更新 episode_summaries（如果前端传了）
+    if "episode_summaries" in body:
+        structure.episode_summaries = body["episode_summaries"]
+
+    cache_row.output_json = _serialize_stage_result(structure)
+    db.commit()
+
+    return {
+        "status": "saved",
+        "scene_count": len(structure.scenes),
+        "scenes": [asdict(s) for s in structure.scenes],
+    }
+
+
+@router.post("/projects/{project_id}/scenes/split/{scene_id}")
+async def split_scene(project_id: str, scene_id: str, request: Request,
+                      db: Session = Depends(get_db)):
+    """拆分场景为两个。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    body = await request.json()
+    split_desc = body.get("split_description", "前半部分")
+
+    structure = _get_latest_cached(db, project_id, 3)
+    if structure is None:
+        raise HTTPException(400, "请先运行 Stage 3")
+
+    target_idx = None
+    for i, s in enumerate(structure.scenes):
+        if s.id == scene_id:
+            target_idx = i
+            break
+
+    if target_idx is None:
+        raise HTTPException(404, f"场景 {scene_id} 不存在")
+
+    original = structure.scenes[target_idx]
+
+    # 创建两个新场景（前半/后半）
+    first_half = ScenePlan(
+        id="",  # 由 renumber 生成
+        act=original.act,
+        episode=original.episode,
+        sequence=original.sequence,
+        location=original.location,
+        time=original.time,
+        setting_description=f"（拆分前段：{split_desc}）",
+        characters_present=list(original.characters_present),
+        summary=f"{original.summary}\n（前半：{split_desc}）",
+        source_chapter=original.source_chapter,
+    )
+
+    second_half = ScenePlan(
+        id="",
+        act=original.act,
+        episode=original.episode,
+        sequence=original.sequence + 1,
+        location=original.location,
+        time=original.time,
+        setting_description="（拆分后段）",
+        characters_present=list(original.characters_present),
+        summary=f"{original.summary}\n（后半）",
+        source_chapter=original.source_chapter,
+    )
+
+    # 替换原场景为两个新场景
+    structure.scenes[target_idx:target_idx + 1] = [first_half, second_half]
+    _renumber_scenes(structure.scenes)
+
+    # 保存
+    cache_row = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == 3,
+    ).order_by(StageCache.created_at.desc()).first()
+    if cache_row:
+        cache_row.output_json = _serialize_stage_result(structure)
+        db.commit()
+
+    return {
+        "status": "split",
+        "scenes": [asdict(s) for s in structure.scenes],
+    }
+
+
+@router.post("/projects/{project_id}/scenes/merge")
+async def merge_scenes(project_id: str, request: Request, db: Session = Depends(get_db)):
+    """合并两个场景为一个。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    body = await request.json()
+    scene_ids = body.get("scene_ids", [])
+
+    if len(scene_ids) != 2:
+        raise HTTPException(400, "请选择恰好 2 个场景进行合并")
+
+    structure = _get_latest_cached(db, project_id, 3)
+    if structure is None:
+        raise HTTPException(400, "请先运行 Stage 3")
+
+    idx_map = {}
+    for i, s in enumerate(structure.scenes):
+        idx_map[s.id] = i
+
+    if scene_ids[0] not in idx_map or scene_ids[1] not in idx_map:
+        raise HTTPException(404, "场景不存在")
+
+    idx_a, idx_b = idx_map[scene_ids[0]], idx_map[scene_ids[1]]
+    if idx_a > idx_b:
+        idx_a, idx_b = idx_b, idx_a
+        scene_ids[0], scene_ids[1] = scene_ids[1], scene_ids[0]
+
+    scene_a = structure.scenes[idx_a]
+    scene_b = structure.scenes[idx_b]
+
+    # 合并 characters_present（去重）
+    merged_chars = list(dict.fromkeys(scene_a.characters_present + scene_b.characters_present))
+
+    merged = ScenePlan(
+        id="",
+        act=scene_a.act,
+        episode=scene_a.episode,
+        sequence=scene_a.sequence,
+        location=scene_a.location or scene_b.location,
+        time=scene_a.time or scene_b.time,
+        setting_description=f"{scene_a.setting_description}\n{scene_b.setting_description}".strip(),
+        characters_present=merged_chars,
+        summary=f"{scene_a.summary}\n——\n{scene_b.summary}",
+        source_chapter=scene_a.source_chapter or scene_b.source_chapter,
+    )
+
+    # 先删后面的，再删前面的
+    del structure.scenes[idx_b]
+    del structure.scenes[idx_a]
+    # 在 idx_a 位置插入合并结果
+    structure.scenes.insert(idx_a, merged)
+    _renumber_scenes(structure.scenes)
+
+    cache_row = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == 3,
+    ).order_by(StageCache.created_at.desc()).first()
+    if cache_row:
+        cache_row.output_json = _serialize_stage_result(structure)
+        db.commit()
+
+    return {
+        "status": "merged",
+        "merged_id": merged.id,
+        "scenes": [asdict(s) for s in structure.scenes],
+    }
+
+
+# ── Character Relationship Graph API ─────────────────────────────────
+
+_IMPORTANCE_MAP = {
+    "protagonist": 4,
+    "antagonist": 3,
+    "supporting": 2,
+    "cameo": 1,
+}
+
+_RELATION_COLORS = {
+    "恋人": "#f472b6",
+    "夫妻": "#f472b6",
+    "情侣": "#f472b6",
+    "师徒": "#a78bfa",
+    "师傅": "#a78bfa",
+    "师父": "#a78bfa",
+    "徒弟": "#a78bfa",
+    "仇敌": "#ef4444",
+    "敌人": "#ef4444",
+    "对手": "#ef4444",
+    "情敌": "#ef4444",
+    "朋友": "#34d399",
+    "好友": "#34d399",
+    "同伴": "#34d399",
+    "父子": "#f59e0b",
+    "母子": "#f59e0b",
+    "父女": "#f59e0b",
+    "母女": "#f59e0b",
+    "兄弟": "#f59e0b",
+    "姐妹": "#f59e0b",
+    "兄妹": "#f59e0b",
+    "姐弟": "#f59e0b",
+    "亲属": "#f59e0b",
+    "主仆": "#60a5fa",
+    "上下级": "#60a5fa",
+}
+
+
+def _pick_rel_color(rel_type: str) -> str:
+    """Match relationship type to a color, with partial matching."""
+    for key, color in _RELATION_COLORS.items():
+        if key in rel_type:
+            return color
+    return "#94a3b8"  # default gray
+
+
+@router.get("/projects/{project_id}/character-graph")
+async def get_character_graph(project_id: str, db: Session = Depends(get_db)):
+    """返回角色关系图谱数据（角色 + 关系 + 出场统计 + 关键台词）。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    # Load Stage 2: characters + relationships
+    s2 = _get_latest_cached(db, project_id, 2)
+    if s2 is None:
+        return {"characters": [], "relationships": [], "status": "no_data"}
+
+    # Load Stage 1: chapter analyses for appearance counts + key quotes
+    s1 = _get_latest_cached(db, project_id, 1)
+
+    # Build appearance count map from Stage 1
+    appear_count: dict[str, int] = {}
+    key_quotes_map: dict[str, list] = {}
+    if s1:
+        for ca in s1:
+            for nc in ca.new_characters:
+                name = nc.get("name", "") if isinstance(nc, dict) else getattr(nc, "name", "")
+                if name:
+                    appear_count[name] = appear_count.get(name, 0) + 1
+            # Collect dialogue excerpts for key quotes
+            for d in ca.dialogue_excerpts:
+                speaker = d.get("speaker", "") if isinstance(d, dict) else getattr(d, "speaker", "")
+                text = d.get("text", "") if isinstance(d, dict) else getattr(d, "text", "")
+                if speaker and text:
+                    if speaker not in key_quotes_map:
+                        key_quotes_map[speaker] = []
+                    if len(key_quotes_map[speaker]) < 3:  # keep max 3 quotes
+                        key_quotes_map[speaker].append(text)
+
+    # Enrich characters
+    characters_out = []
+    for c in s2.characters:
+        char_dict = c if isinstance(c, dict) else asdict(c) if hasattr(c, '__dataclass_fields__') else c
+        name = char_dict.get("name", "")
+        role = char_dict.get("role", "supporting")
+        # Try matching by name or aliases for appearance count
+        count = appear_count.get(name, 0)
+        if count == 0:
+            for alias in char_dict.get("aliases", []):
+                if appear_count.get(alias, 0) > count:
+                    count = appear_count[alias]
+        quotes = key_quotes_map.get(name, [])
+        if not quotes:
+            for alias in char_dict.get("aliases", []):
+                if key_quotes_map.get(alias):
+                    quotes = key_quotes_map[alias]
+                    break
+
+        characters_out.append({
+            "name": name,
+            "aliases": char_dict.get("aliases", []),
+            "role": role,
+            "description": char_dict.get("description", ""),
+            "traits": char_dict.get("traits", []),
+            "first_appearance_chapter": char_dict.get("first_appearance_chapter", 1),
+            "appearance_count": count,
+            "key_quotes": quotes,
+            "importance": _IMPORTANCE_MAP.get(role, 1),
+        })
+
+    # Enrich relationships
+    relationships_out = []
+    for r in s2.relationships:
+        rel_dict = r if isinstance(r, dict) else asdict(r) if hasattr(r, '__dataclass_fields__') else r
+        rel_type = rel_dict.get("type", "其他")
+        relationships_out.append({
+            "from": rel_dict.get("from", ""),
+            "to": rel_dict.get("to", ""),
+            "type": rel_type,
+            "description": rel_dict.get("description", ""),
+            "color": _pick_rel_color(rel_type),
+        })
+
+    return {
+        "status": "ok",
+        "characters": characters_out,
+        "relationships": relationships_out,
+    }
+
+
+@router.post("/projects/{project_id}/scenes/run-stage4")
+async def run_stage4_from_kanban(project_id: str, db: Session = Depends(get_db)):
+    """从看板直接触发 Stage 4 运行（返回 SSE 流端点 URL）。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    structure = _get_latest_cached(db, project_id, 3)
+    if structure is None or not structure.scenes:
+        raise HTTPException(400, "没有场景数据，请先运行或编辑 Stage 3")
+
+    return {
+        "status": "ready",
+        "scene_count": len(structure.scenes),
+        "run_url": f"/api/projects/{project_id}/run-stage/4",
+    }
 
 
 def _inject_percent(msg: dict):
