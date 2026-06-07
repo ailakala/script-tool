@@ -41,7 +41,7 @@
             <div style="display:flex;align-items:center;gap:0.75em">
                 <progress id="progress-bar" value="0" max="100" style="flex:1"></progress>
                 <span id="progress-percent">0%</span>
-                <span id="progress-timer" style="color:var(--fg-secondary);font-size:0.85em;white-space:nowrap">00:00</span>
+                <span id="pipeline-timer" style="display:none;font-variant-numeric:tabular-nums;color:var(--accent-3);font-weight:700;font-size:0.9em;white-space:nowrap">⏱ 00:00</span>
             </div>
         </div>
         <div id="completion-toast">
@@ -49,7 +49,7 @@
                 <span style="font-size:2em">🎉</span>
                 <div>
                     <strong style="font-size:1.1em;color:var(--fg-primary)">剧本生成完成！</strong>
-                    <p id="completion-time" style="margin:0.25em 0 0;color:var(--fg-secondary);font-size:0.9em">全部 6 个阶段已处理完毕</p>
+                    <p style="margin:0.25em 0 0;color:var(--fg-secondary);font-size:0.9em">全部 6 个阶段已处理完毕 · 耗时 <span id="completion-time" style="color:var(--accent-3);font-weight:700">--</span></p>
                 </div>
                 <button onclick="closeCompletionToast()" class="btn-ghost" style="margin-left:0.5em">✕</button>
             </div>
@@ -123,6 +123,51 @@
 <script>
 let _nextStage = 1;
 let _stepMode = false;
+let _timerStart = null;
+let _timerInterval = null;
+
+function formatElapsed(ms) {
+    var total = Math.floor(ms / 1000);
+    var h = Math.floor(total / 3600);
+    var m = Math.floor((total % 3600) / 60);
+    var s = total % 60;
+    if (h > 0) {
+        return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    }
+    return String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+}
+
+function startTimer() {
+    _timerStart = Date.now();
+    var el = document.getElementById('pipeline-timer');
+    if (el) {
+        el.style.display = 'inline';
+        el.classList.remove('stopped');
+        el.textContent = '⏱ 00:00';
+    }
+    if (_timerInterval) clearInterval(_timerInterval);
+    _timerInterval = setInterval(function() {
+        if (_timerStart) {
+            var el2 = document.getElementById('pipeline-timer');
+            if (el2) el2.textContent = '⏱ ' + formatElapsed(Date.now() - _timerStart);
+        }
+    }, 1000);
+}
+
+function stopTimer() {
+    if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+    var elapsed = _timerStart ? Date.now() - _timerStart : 0;
+    _timerStart = null;
+    var el = document.getElementById('pipeline-timer');
+    if (el) {
+        el.textContent = '⏱ ' + formatElapsed(elapsed);
+        el.classList.add('stopped');
+    }
+    // Update completion toast
+    var ct = document.getElementById('completion-time');
+    if (ct) ct.textContent = formatElapsed(elapsed);
+    return elapsed;
+}
 
 document.addEventListener('DOMContentLoaded', async function() {
     try {
@@ -326,6 +371,7 @@ async function runPipeline() {
     hideResumeBar();
     document.getElementById('restart-btn').style.display = 'none';
     document.getElementById('review-panel').style.display = 'none';
+    startTimer();
 
     const ok = await streamSSE('/api/projects/{{ project.id }}/run', function(msg) {
         if (msg.percent !== undefined) updateProgress(msg.percent);
@@ -335,6 +381,7 @@ async function runPipeline() {
         }
         if (msg.status === 'complete') {
             updateProgress(100);
+            stopTimer();
             if (msg.errors && msg.errors.length > 0) {
                 alert('Done with errors:\n' + msg.errors.join('\n'));
             }
@@ -360,6 +407,7 @@ async function runStepByStep() {
     _stepMode = true;
     _nextStage = 0;
     document.getElementById('review-panel').style.display = 'none';
+    startTimer();
     await runNextStage();
 }
 
@@ -404,6 +452,7 @@ async function runNextStage() {
             } else if (_nextStage <= 5) {
                 runNextStage();
             } else {
+                stopTimer();
                 setButtons(false);
                 reviewPanel.style.display = 'none';
                 showCompletionToast();
