@@ -36,26 +36,37 @@ def _load_text(project_id: str) -> str:
 
 def _render_import_result(title: str, stats: dict) -> HTMLResponse:
     """Generate HTML status card for HTMX upload/paste responses."""
+    # 暗色主题兼容：使用半透明深色背景 + 高可读性文字颜色
+    is_error = bool(stats.get("errors"))
+    accent_color = "#f87171" if is_error else "#34d399"   # red / green
+    accent_bg = "rgba(239,68,68,0.1)" if is_error else "rgba(16,185,129,0.1)"
+    accent_border = "rgba(239,68,68,0.25)" if is_error else "rgba(16,185,129,0.25)"
+    title_color = "#fca5a5" if is_error else "#34d399"
+    icon = stats.get("icon", "⚠️" if is_error else "✅")
+
     errors_html = ""
     if stats.get("errors"):
         items = "".join(f"<li>{e}</li>" for e in stats["errors"])
         errors_html = (
-            f'<div style="margin-top:0.75em;padding:0.75em;background:#fef3c7;'
-            f'border-radius:6px;font-size:0.9em;color:#92400e">'
+            f'<div style="margin-top:0.75em;padding:0.75em;'
+            f'background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);'
+            f'border-radius:6px;font-size:0.9em;color:#fbbf24">'
             f'<strong>⚠ 警告：</strong><ul style="margin:0.25em 0 0;padding-left:1.25em">{items}</ul>'
             f'</div>'
         )
 
     items_html = "".join(
-        f"<div style=\"display:flex;justify-content:space-between;padding:0.4em 0;border-bottom:1px solid #f3f4f6\">"
-        f"<span style=\"color:#6b7280\">{k}</span><strong>{v}</strong></div>"
+        f"<div style=\"display:flex;justify-content:space-between;"
+        f"padding:0.4em 0;border-bottom:1px solid rgba(255,255,255,0.06)\">"
+        f"<span style=\"color:#a0a0b8;font-size:0.9em\">{k}</span>"
+        f"<strong style=\"color:#e8e8f0;font-size:0.95em\">{v}</strong></div>"
         for k, v in stats.get("items", [])
     )
 
-    return HTMLResponse(content=f"""<div id="upload-result" style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:1em;margin-top:0.5em;animation:scaleIn 0.3s ease">
+    return HTMLResponse(content=f"""<div id="upload-result" style="background:{accent_bg};border:1px solid {accent_border};border-radius:var(--radius);padding:1em;margin-top:0.5em;animation:scaleIn 0.3s ease">
 <div style="display:flex;align-items:center;gap:0.5em;margin-bottom:0.75em">
-    <span style="font-size:1.5em">{stats.get("icon", "✅")}</span>
-    <strong style="font-size:1.05em;color:#166534">{title}</strong>
+    <span style="font-size:1.5em">{icon}</span>
+    <strong style="font-size:1.05em;color:{title_color}">{title}</strong>
 </div>
 {items_html}
 {errors_html}

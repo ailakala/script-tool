@@ -13,7 +13,7 @@
   --glass-active: rgba(255, 255, 255, 0.1);
   --fg-primary: #e8e8f0;
   --fg-secondary: #a0a0b8;
-  --fg-muted: #6b6b80;
+  --fg-muted: #85859e;
   --accent: #6366f1;
   --accent-glow: rgba(99, 102, 241, 0.4);
   --accent-2: #8b5cf6;
@@ -52,11 +52,13 @@ html {
 
 body {
   font-family: var(--font-sans);
+  font-size: 0.95em;
   background: var(--bg-deep);
   color: var(--fg-primary);
-  line-height: 1.6;
+  line-height: 1.7;
   min-height: 100vh;
   overflow-x: hidden;
+  text-rendering: optimizeLegibility;
 }
 
 /* ── Particle Canvas ─────────────────────────────────── */
@@ -108,8 +110,12 @@ body {
   border-bottom: 1px solid var(--glass-border);
 }
 .nav-count {
-    font-size: 0.8em; color: #6b7280;
-    background: #f3f4f6; padding: 2px 10px; border-radius: 10px;
+    font-size: 0.8em;
+    color: var(--accent-3);
+    background: rgba(99, 102, 241, 0.12);
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-weight: 500;
 }
 
 .nav-brand {
@@ -177,7 +183,7 @@ h1 {
   font-weight: 800;
   letter-spacing: -0.03em;
   margin-bottom: 0.75em;
-  background: linear-gradient(135deg, var(--fg-primary) 0%, var(--fg-secondary) 100%);
+  background: linear-gradient(135deg, var(--fg-primary) 0%, #c4c4d0 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -484,7 +490,7 @@ button:disabled {
 
 .file-name-text {
   font-size: 0.85em;
-  color: var(--fg-muted);
+  color: var(--fg-secondary);
   margin-left: 0.75em;
 }
 
@@ -527,7 +533,7 @@ progress::-moz-progress-bar {
 /* ── Drag-and-drop upload ───────────────────────────────────── */
 
 .drop-zone {
-    border: 2px dashed #d1d5db;
+    border: 2px dashed rgba(255, 255, 255, 0.12);
     border-radius: var(--radius);
     padding: 1.5em;
     text-align: center;
@@ -537,21 +543,24 @@ progress::-moz-progress-bar {
 }
 .drop-zone.dragover {
     border-color: var(--accent);
-    background: #eff6ff;
+    background: rgba(99, 102, 241, 0.06);
 }
 .drop-zone-icon { font-size: 1.5em; margin-bottom: 0.25em; }
-.drop-zone-text { color: #6b7280; font-size: 0.9em; }
-.drop-zone-hint { color: #9ca3af; font-size: 0.8em; margin-top: 0.25em; }
+.drop-zone-text { color: var(--fg-secondary); font-size: 0.9em; }
+.drop-zone-hint { color: var(--fg-muted); font-size: 0.8em; margin-top: 0.25em; }
 
 /* ── Chat panel ──────────────────────────────────────────────── */
 
 .chat-panel {
-    background: #fff; border: 1px solid var(--border);
+    background: rgba(15, 15, 40, 0.92);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border: 1px solid var(--glass-border);
     border-radius: var(--radius) var(--radius) 0 0;
     position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
     width: min(960px, 100vw - 2em);
     z-index: 1000;
-    box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.5);
     transition: max-height 0.3s ease;
 }
 .chat-panel.collapsed { max-height: 44px; }
@@ -562,13 +571,13 @@ progress::-moz-progress-bar {
     padding: 0.6em 1em;
     cursor: pointer;
     user-select: none;
-    border-bottom: 1px solid var(--border);
-    background: #f9fafb;
+    border-bottom: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.03);
     border-radius: var(--radius) var(--radius) 0 0;
 }
-.chat-header:hover { background: #f3f4f6; }
-.chat-header-left { display: flex; align-items: center; gap: 0.5em; font-weight: 600; font-size: 0.95em; }
-.chat-toggle { font-size: 0.8em; color: #9ca3af; transition: transform 0.3s; }
+.chat-header:hover { background: rgba(255, 255, 255, 0.06); }
+.chat-header-left { display: flex; align-items: center; gap: 0.5em; font-weight: 600; font-size: 0.95em; color: var(--fg-primary); }
+.chat-toggle { font-size: 0.8em; color: var(--fg-muted); transition: transform 0.3s; }
 .chat-panel.expanded .chat-toggle { transform: rotate(180deg); }
 
 .chat-body { display: none; flex-direction: column; height: 400px; }
@@ -581,16 +590,17 @@ progress::-moz-progress-bar {
 
 .chat-actions {
     display: flex; gap: 0.4em; padding: 0.5em 1em;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--glass-border);
     flex-wrap: wrap;
 }
 .chat-action-btn {
     font-size: 0.78em; padding: 0.3em 0.7em;
-    background: #f3f4f6; color: #374151;
-    border: 1px solid #e5e7eb; border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06); color: var(--fg-secondary);
+    border: 1px solid var(--glass-border); border-radius: 12px;
     cursor: pointer; white-space: nowrap;
+    transition: var(--transition);
 }
-.chat-action-btn:hover { background: #e5e7eb; }
+.chat-action-btn:hover { background: rgba(255, 255, 255, 0.12); color: var(--fg-primary); }
 
 .chat-msg {
     max-width: 85%; padding: 0.5em 0.75em;
@@ -604,20 +614,22 @@ progress::-moz-progress-bar {
 }
 .chat-msg.assistant {
     align-self: flex-start;
-    background: #f3f4f6; color: #1a1a1a;
+    background: rgba(255, 255, 255, 0.08); color: var(--fg-primary);
     border-bottom-left-radius: 2px;
 }
 
 .chat-input-row {
     display: flex; gap: 0.5em; padding: 0.75em 1em;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--glass-border);
     align-items: flex-end;
 }
 .chat-input-row textarea {
     flex: 1; padding: 0.5em; font-size: 0.9em;
-    border: 1px solid var(--border); border-radius: var(--radius);
+    border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
     resize: none; rows: 2;
     font-family: inherit;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--fg-primary);
 }
 .chat-input-row textarea:focus { outline: none; border-color: var(--accent); }
 .chat-send-btn {
@@ -626,11 +638,13 @@ progress::-moz-progress-bar {
 
 .chat-options {
     display: flex; gap: 0.75em; padding: 0.4em 1em 0.5em;
-    font-size: 0.8em; color: #6b7280; align-items: center;
+    font-size: 0.8em; color: var(--fg-secondary); align-items: center;
 }
 .chat-options select {
     width: auto; padding: 0.2em 0.4em; font-size: 0.85em;
-    margin-top: 0; border: 1px solid #e5e7eb; border-radius: 4px;
+    margin-top: 0; border: 1px solid var(--glass-border); border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--fg-primary);
 }
 
 /* ── Animations ─────────────────────────────────────────────── */
@@ -880,9 +894,10 @@ hr {
   border-radius: var(--radius-sm);
   padding: 1em;
   font-family: var(--font-mono);
-  font-size: 0.8em;
-  color: var(--fg-secondary);
+  font-size: 0.82em;
+  color: #c4c4d0;
   white-space: pre-wrap;
+  line-height: 1.7;
 }
 
 /* ═══════════════════════════════════════════════════════════

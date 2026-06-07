@@ -96,7 +96,9 @@
             <label>模型:
                 <select id="chat-model">
                     <option value="claude">Claude</option>
-                    <option value="openai">GPT</option>
+                    <option value="openai">GPT (OpenAI)</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="gemini">Gemini (Google)</option>
                     <option value="local">本地模型</option>
                 </select>
             </label>
@@ -397,10 +399,18 @@ async function sendMessage() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({message: text, model: model}),
         });
+        if (!res.ok) {
+            var errText = 'HTTP ' + res.status;
+            try { var errJson = await res.json(); errText = errJson.detail || errText; } catch(e) {}
+            assistantDiv.textContent = '❌ ' + errText + '（请检查该模型的 API Key 是否在 .env 中配置）';
+            _chatStreaming = false;
+            return;
+        }
         var reader = res.body.getReader();
         var decoder = new TextDecoder();
         var buffer = '';
         var fullText = '';
+        var hasError = false;
         while (true) {
             var r = await reader.read();
             if (r.done) break;
@@ -417,12 +427,13 @@ async function sendMessage() {
                         scrollChat();
                     }
                     if (msg.error) {
-                        assistantDiv.textContent = 'Error: ' + msg.error;
+                        hasError = true;
+                        assistantDiv.textContent = '❌ ' + msg.error;
                     }
                 }
             }
         }
-        if (!fullText) assistantDiv.textContent = '(no response)';
+        if (!fullText && !hasError) assistantDiv.textContent = '(no response)';
     } catch (e) {
         assistantDiv.textContent = 'Request failed: ' + e.message;
     }
