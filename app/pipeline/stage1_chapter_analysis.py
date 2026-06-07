@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from app.ai.interface import AIProvider
 from app.ai.factory import create_ai_provider
 from app.pipeline.stage0_preprocess import Chapter
+from app.pipeline.utils import extract_json
 
 @dataclass
 class ChapterAnalysis:
@@ -50,25 +51,31 @@ async def analyze_chapter(chapter: Chapter, provider: AIProvider = None) -> Chap
     return _parse_response(chapter.index, chapter.title, response)
 
 
-async def analyze_chapters_parallel(chapters: list, provider: AIProvider = None) -> list:
+async def analyze_chapters_parallel(chapters: list, provider: AIProvider = None,
+                                   on_chapter_done=None) -> list:
     if provider is None:
         provider = create_ai_provider()
     tasks = [analyze_chapter(c, provider) for c in chapters]
-    return await asyncio.gather(*tasks)
+
+    # 使用 as_completed 实现逐章进度回调
+    results = []
+    for coro in asyncio.as_completed(tasks):
+        result = await coro
+        results.append(result)
+        if on_chapter_done:
+            await on_chapter_done()
+
+    # 按章节索引排序，确保顺序一致
+    results.sort(key=lambda r: r.chapter_index)
+    return results
 
 
 def _parse_response(index: int, title: str, response: str) -> ChapterAnalysis:
     analysis = ChapterAnalysis(chapter_index=index, chapter_title=title, raw_response=response)
-    try:
-        text = response.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            text = "\n".join(lines[1:-1])
-        data = json.loads(text)
+    data = extract_json(response)
+    if data:
         analysis.new_characters = data.get("new_characters", [])
         analysis.locations = data.get("locations", [])
         analysis.plot_events = data.get("plot_events", [])
         analysis.dialogue_excerpts = data.get("dialogue_excerpts", [])
-    except (json.JSONDecodeError, KeyError):
-        pass
     return analysis
