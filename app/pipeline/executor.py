@@ -140,8 +140,17 @@ async def run_stage_4(project_id: str, structure: ScriptStructure,
         empty = [s for s in result if not s.content]
         if empty and result:
             names = ", ".join(s.id for s in empty)
+            # 查看第一个空场景的原始响应帮助诊断
+            raw_preview = ""
+            for s in empty:
+                if s.raw_response:
+                    raw_preview = s.raw_response[:300]
+                    break
+            hint = f"\n原始响应预览：{raw_preview}" if raw_preview else ""
             raise ValueError(
-                f"{len(empty)}/{len(result)} 个场景内容为空（{names}）。AI 返回异常，请重试。"
+                f"{len(empty)}/{len(result)} 个场景内容为空（{names}）。"
+                f"已自动重试 2 次仍失败，可能是 AI 返回了不完整的 JSON。"
+                f"建议：换用其他 AI 模型或减少场景复杂度后重试。{hint}"
             )
         return result
 
@@ -231,6 +240,7 @@ async def run_pipeline(project_id: str, text: str, meta: dict, config: dict,
 
         # Stage 3: 剧本结构设计
         state.set_stage(3, StageStatus.RUNNING)
+        config["num_chapters"] = len(preprocess.chapters)
         structure = await run_stage_3(
             project_id, global_analysis, config, provider, notify, cache_get, cache_put)
         state.stage_results["structure"] = structure
@@ -262,9 +272,16 @@ async def run_pipeline(project_id: str, text: str, meta: dict, config: dict,
         empty_scenes = [s for s in scenes if not s.content]
         if empty_scenes and n_scenes > 0:
             names = ", ".join(s.id for s in empty_scenes)
+            raw_preview = ""
+            for s in empty_scenes:
+                if s.raw_response:
+                    raw_preview = s.raw_response[:300]
+                    break
+            hint = f"\n原始响应预览：{raw_preview}" if raw_preview else ""
             raise ValueError(
                 f"{len(empty_scenes)}/{n_scenes} 个场景内容为空（{names}）。"
-                f" 请删除项目重建，或联系开发者检查 AI 响应。"
+                f"已自动重试 2 次仍失败，可能是 AI 返回了不完整的 JSON。"
+                f"建议：换用其他 AI 模型或减少场景复杂度后重试。{hint}"
             )
         await notify(f"{n_scenes} 场内容生成完成")
 

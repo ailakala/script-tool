@@ -25,14 +25,23 @@
 
     <div class="panel" id="pipeline-panel">
         <h2>⚡ 生成剧本</h2>
-        <div style="display:flex;gap:0.5em;margin-bottom:1em">
+        <div style="display:flex;gap:0.5em;margin-bottom:0.75em">
             <button id="run-btn" onclick="runPipeline()">🚀 一键生成</button>
             <button id="step-btn" onclick="runStepByStep()" class="btn-secondary">📋 分步生成</button>
+            <button id="restart-btn" onclick="restartPipeline()" class="btn-secondary" style="display:none">🔄 重新开始</button>
+        </div>
+        <div id="resume-bar" style="display:none;padding:0.75em 1em;margin-bottom:0.75em;background:rgba(34,211,238,0.1);border:1px solid rgba(34,211,238,0.25);border-radius:8px;align-items:center;justify-content:space-between">
+            <span style="color:#67e8f9;font-size:0.95em">检测到已完成 <strong id="resume-stage-label">Stage 0-2</strong>，可继续生成</span>
+            <div style="display:flex;gap:0.5em">
+                <button id="resume-btn" onclick="resumePipeline()" style="background:#06b6d4;color:#fff;border:none;padding:0.4em 1em;border-radius:6px;cursor:pointer;font-size:0.9em">▶ 继续生成</button>
+                <button onclick="restartPipeline()" style="background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3);padding:0.4em 1em;border-radius:6px;cursor:pointer;font-size:0.9em">🔄 重新开始</button>
+            </div>
         </div>
         <div id="progress-bar-container" style="margin-bottom:0.75em;display:none">
             <div style="display:flex;align-items:center;gap:0.75em">
                 <progress id="progress-bar" value="0" max="100" style="flex:1"></progress>
                 <span id="progress-percent">0%</span>
+                <span id="progress-timer" style="color:var(--fg-secondary);font-size:0.85em;white-space:nowrap">00:00</span>
             </div>
         </div>
         <div id="completion-toast">
@@ -40,7 +49,7 @@
                 <span style="font-size:2em">🎉</span>
                 <div>
                     <strong style="font-size:1.1em;color:var(--fg-primary)">剧本生成完成！</strong>
-                    <p style="margin:0.25em 0 0;color:var(--fg-secondary);font-size:0.9em">全部 6 个阶段已处理完毕</p>
+                    <p id="completion-time" style="margin:0.25em 0 0;color:var(--fg-secondary);font-size:0.9em">全部 6 个阶段已处理完毕</p>
                 </div>
                 <button onclick="closeCompletionToast()" class="btn-ghost" style="margin-left:0.5em">✕</button>
             </div>
@@ -127,26 +136,91 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     } catch(e) { /* ignore */ }
 
-    let maxDone = -1;
-    for (let s = 0; s <= 5; s++) {
-        try {
-            const res = await fetch('/api/projects/{{ project.id }}/stage/' + s);
-            if (res.ok) {
-                const data = await res.json();
-                if (data.status === 'cached') {
+    // Check pipeline status
+    try {
+        const statusRes = await fetch('/api/projects/{{ project.id }}/pipeline-status');
+        if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            let maxDone = -1;
+            for (let s = 0; s <= 5; s++) {
+                if (statusData.stages && statusData.stages[String(s)] === 'cached') {
                     updateStage(s, 'done', '');
                     maxDone = Math.max(maxDone, s);
-                    if (s === 5 && data.data) {
-                        showResult(data.data.screenplay_text || data.data.yaml_text || '');
-                    }
                 }
             }
-        } catch(e) { /* ignore */ }
-    }
-    if (maxDone >= 0) {
-        updateProgress(Math.min((maxDone + 1) * 100 / 6, 100));
-    }
+            if (maxDone >= 0) {
+                updateProgress(Math.min((maxDone + 1) * 100 / 6, 100));
+            }
+            if (statusData.is_complete) {
+                // All done - show result
+                showResumeBar(null);  // hide
+                document.getElementById('restart-btn').style.display = 'inline-flex';
+                // Load result
+                try {
+                    const r5 = await fetch('/api/projects/{{ project.id }}/stage/5');
+                    if (r5.ok) {
+                        const d5 = await r5.json();
+                        if (d5.data) showResult(d5.data.screenplay_text || d5.data.yaml_text || '');
+                    }
+                } catch(e) {}
+            } else if (maxDone >= 0) {
+                // Partial progress - show resume bar
+                showResumeBar(maxDone);
+                document.getElementById('restart-btn').style.display = 'inline-flex';
+            }
+            // Show last error if any
+            if (statusData.last_error) {
+                updateStage(maxDone + 1, 'error', statusData.last_error);
+            }
+        }
+    } catch(e) { /* ignore */ }
 });
+
+function showResumeBar(maxDone) {
+    var bar = document.getElementById('resume-bar');
+    if (!bar) return;
+    if (maxDone === null || maxDone === undefined) {
+        bar.style.display = 'none';
+        return;
+    }
+    var label = document.getElementById('resume-stage-label');
+    var stageNames = ['文本预处理', '分章节分析', '跨章节综合', '剧本结构设计', '逐场内容生成', '组装校验'];
+    if (label) {
+        label.textContent = 'Stage 0-' + maxDone + '（' + stageNames.slice(0, maxDone+1).join(' → ') + '）';
+    }
+    bar.style.display = 'flex';
+}
+
+function hideResumeBar() {
+    var bar = document.getElementById('resume-bar');
+    if (bar) bar.style.display = 'none';
+}
+
+async function resumePipeline() {
+    hideResumeBar();
+    document.getElementById('restart-btn').style.display = 'none';
+    // Full pipeline mode skips cached stages automatically
+    await runPipeline();
+}
+
+async function restartPipeline() {
+    if (!confirm('重新开始将清除所有已生成的缓存数据，确定要重新开始吗？')) return;
+    hideResumeBar();
+    document.getElementById('restart-btn').style.display = 'none';
+    // Clear all caches
+    try {
+        await fetch('/api/projects/{{ project.id }}/clear-cache', { method: 'POST' });
+    } catch(e) {}
+    // Reset UI
+    for (var s = 0; s <= 5; s++) {
+        updateStage(s, '', '');
+    }
+    updateProgress(0);
+    document.getElementById('progress-bar-container').style.display = 'none';
+    document.getElementById('result-panel').querySelectorAll('pre').forEach(function(el) { el.remove(); });
+    // Start fresh
+    await runPipeline();
+}
 
 // Drag-and-drop upload
 (function() {
@@ -209,6 +283,19 @@ function updateProgress(percent) {
     if (pct) pct.textContent = percent + '%';
 }
 
+function formatElapsed(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+function updateTimer(elapsed) {
+    const timer = document.getElementById('progress-timer');
+    if (timer && elapsed !== undefined) {
+        timer.textContent = formatElapsed(elapsed);
+    }
+}
+
 async function streamSSE(url, onMessage) {
     const res = await fetch(url, {
         method: 'POST',
@@ -236,21 +323,30 @@ async function streamSSE(url, onMessage) {
 
 async function runPipeline() {
     setButtons(true);
+    hideResumeBar();
+    document.getElementById('restart-btn').style.display = 'none';
     document.getElementById('review-panel').style.display = 'none';
 
     const ok = await streamSSE('/api/projects/{{ project.id }}/run', function(msg) {
         if (msg.percent !== undefined) updateProgress(msg.percent);
+        if (msg.elapsed !== undefined) updateTimer(msg.elapsed);
         if (msg.message && msg.current_stage !== undefined) {
             updateStage(msg.current_stage, msg.stage_status[msg.current_stage], msg.message);
         }
         if (msg.status === 'complete') {
+            updateProgress(100);
             if (msg.errors && msg.errors.length > 0) {
                 alert('Done with errors:\n' + msg.errors.join('\n'));
+            }
+            var timeP = document.getElementById('completion-time');
+            if (timeP && msg.elapsed) {
+                timeP.textContent = '全部 6 个阶段已处理完毕，耗时 ' + formatElapsed(msg.elapsed);
             }
             showCompletionToast();
             if (msg.screenplay_text || msg.yaml_text) {
                 showResult(msg.screenplay_text || msg.yaml_text);
             }
+            document.getElementById('restart-btn').style.display = 'inline-flex';
         }
     });
 
@@ -259,6 +355,8 @@ async function runPipeline() {
 
 async function runStepByStep() {
     setButtons(true);
+    hideResumeBar();
+    document.getElementById('restart-btn').style.display = 'none';
     _stepMode = true;
     _nextStage = 0;
     document.getElementById('review-panel').style.display = 'none';
@@ -288,11 +386,13 @@ async function runNextStage() {
 
     const ok = await streamSSE('/api/projects/{{ project.id }}/run-stage/' + stage, function(msg) {
         if (msg.percent !== undefined) updateProgress(msg.percent);
+        if (msg.elapsed !== undefined) updateTimer(msg.elapsed);
         if (msg.message) {
             updateStage(stage, 'running', msg.message);
         }
         if (msg.status === 'complete') {
             updateStage(stage, 'done', '');
+            updateProgress(msg.percent || ((stage + 1) * 100 / 6));
             _nextStage = stage + 1;
 
             if (_stepMode && (stage === 1 || stage === 2 || stage === 3)) {

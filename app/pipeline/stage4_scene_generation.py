@@ -122,23 +122,43 @@ async def generate_scenes_parallel(plans: list, characters: list,
             if ca.dialogue_excerpts:
                 chapter_dialogue_map[ca.chapter_index] = ca.dialogue_excerpts
 
-    tasks = [
-        generate_scene(
-            p, characters,
-            chapter_texts.get(p.source_chapter, ""),
-            chapter_dialogue_map.get(p.source_chapter, []),
+    async def _gen_one(plan: ScenePlan) -> GeneratedScene:
+        return await generate_scene(
+            plan, characters,
+            chapter_texts.get(plan.source_chapter, ""),
+            chapter_dialogue_map.get(plan.source_chapter, []),
             provider,
         )
-        for p in plans
-    ]
 
-    # 使用 as_completed 实现逐场进度回调
+    # 第一轮并行生成
+    tasks = [_gen_one(p) for p in plans]
     results = []
     for coro in asyncio.as_completed(tasks):
         result = await coro
         results.append(result)
         if on_scene_done:
             await on_scene_done()
+
+    # 重试空场景（最多 2 次）
+    MAX_RETRIES = 2
+    for attempt in range(MAX_RETRIES):
+        empty = [r for r in results if not r.content]
+        if not empty:
+            break
+        print(f"[generate_scenes_parallel] 第 {attempt+1} 次重试 {len(empty)} 个空场景："
+              f"{', '.join(s.id for s in empty)}")
+        retry_tasks = [_gen_one(s) for s in empty]
+        retry_results = []
+        for coro in asyncio.as_completed(retry_tasks):
+            new_result = await coro
+            retry_results.append(new_result)
+            if on_scene_done:
+                await on_scene_done()
+        # 替换原结果
+        retry_map = {r.id: r for r in retry_results}
+        for i, r in enumerate(results):
+            if not r.content and r.id in retry_map:
+                results[i] = retry_map[r.id]
 
     # 按 scene id 排序，确保顺序一致
     results.sort(key=lambda r: r.sequence)

@@ -248,11 +248,15 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
     db.add(run)
     db.commit()
 
+    import time as _time
+    _start_time = _time.time()
+
     async def event_stream():
         queue: asyncio.Queue = asyncio.Queue()
         pipeline_state = None
 
         async def progress_callback(msg):
+            msg["elapsed"] = round(_time.time() - _start_time, 1)
             await queue.put(msg)
 
         async def run_pipeline_task():
@@ -306,8 +310,11 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
         db.commit()
 
         assembly = pipeline_state.stage_results.get("assembly")
+        total_elapsed = round(_time.time() - _start_time, 1)
         final_msg = {
             "status": "complete",
+            "percent": 100,
+            "elapsed": total_elapsed,
             "errors": pipeline_state.errors,
             "yaml_text": assembly.yaml_text if assembly else "",
             "screenplay_text": assembly.screenplay_text if assembly else "",
@@ -357,6 +364,9 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
     if input_text:
         _save_text(project_id, input_text)
 
+    import time as _time_stage
+    _stage_start = _time_stage.time()
+
     async def event_stream():
         queue: asyncio.Queue = asyncio.Queue()
 
@@ -366,6 +376,7 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
                 "current_stage": stage,
                 "stage_status": {stage: "running"},
                 "message": msg,
+                "elapsed": round(_time_stage.time() - _stage_start, 1),
             })
 
         async def cache_get(pid, stg, input_hash):
@@ -420,8 +431,11 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
 
             elif stage == 3:
                 s2 = _get_latest_cached(db, project_id, 2)
+                s0 = _get_latest_cached(db, project_id, 0)
                 if s2 is None:
                     raise ValueError("请先运行 Stage 2")
+                if s0:
+                    config["num_chapters"] = len(s0.chapters)
                 return await run_stage_3(project_id, s2, config, provider, notify, cache_get, cache_put)
 
             elif stage == 4:
@@ -499,7 +513,8 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
 
         db.commit()
 
-        final_msg = {"status": "complete", "stage": stage}
+        total_elapsed_stage = round(_time_stage.time() - _stage_start, 1)
+        final_msg = {"status": "complete", "stage": stage, "percent": min((stage + 1) * 100 // 6, 100), "elapsed": total_elapsed_stage}
         if stage == 5 and hasattr(result, 'yaml_text'):
             final_msg["yaml_text"] = result.yaml_text
             final_msg["screenplay_text"] = getattr(result, 'screenplay_text', '')
@@ -695,6 +710,42 @@ async def get_stage_result(project_id: str, stage: int, db: Session = Depends(ge
         }
     except (json.JSONDecodeError, TypeError):
         return {"stage": stage, "status": "error", "data": None}
+
+
+@router.get("/projects/{project_id}/pipeline-status")
+async def get_pipeline_status(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    status_map = {}
+    for stage in range(6):
+        row = db.query(StageCache).filter(
+            StageCache.project_id == project_id,
+            StageCache.stage == stage,
+        ).order_by(StageCache.created_at.desc()).first()
+        status_map[str(stage)] = "cached" if row else "pending"
+
+    next_stage = None
+    for s in range(6):
+        if status_map[str(s)] == "pending":
+            next_stage = s
+            break
+    is_complete = next_stage is None and all(v == "cached" for v in status_map.values())
+
+    # Check if there's an error in the latest run
+    last_run = db.query(PipelineRun).filter(
+        PipelineRun.project_id == project_id
+    ).order_by(PipelineRun.started_at.desc()).first()
+    last_error = last_run.error_message if last_run and last_run.error_message else None
+
+    return {
+        "stages": status_map,
+        "next_stage": next_stage,
+        "is_complete": is_complete,
+        "project_status": project.status,
+        "last_error": last_error,
+    }
 
 
 @router.delete("/projects/{project_id}")
