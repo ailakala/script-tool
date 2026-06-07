@@ -1,5 +1,6 @@
-视频介绍：1.51 复制打开抖音，看看【用户7344779806406的作品】七牛云☁竞赛视频 # 七牛云 # aicoding... https://v.douyin.com/09iMpaV-8JA/ :9pm 08/24 E@u.SY KJv:/ 
-https://v.douyin.com/09iMpaV-8JA/
+视频介绍：
+【七牛云☁竞赛视频-哔哩哔哩】 https://b23.tv/AqzOm9g
+七牛云☁竞赛视频 # 七牛云 # aicoding... https://v.douyin.com/09iMpaV-8JA/
 
 # 🎬 AI 剧本创作工具
 
