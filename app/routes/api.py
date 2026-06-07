@@ -1,13 +1,15 @@
 import json
 import asyncio
 from dataclasses import asdict
+from urllib.parse import quote
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse, PlainTextResponse
+from fastapi.responses import StreamingResponse, PlainTextResponse, HTMLResponse, Response
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import Project, PipelineRun, StageCache
 from app.pipeline.executor import (run_pipeline, compute_input_hash,
     run_stage_0, run_stage_1, run_stage_2, run_stage_3, run_stage_4, run_stage_5)
+from app.config import TEXT_STORE_DIR
 from app.pipeline.stage0_preprocess import PreprocessResult, Chapter
 from app.pipeline.stage1_chapter_analysis import ChapterAnalysis
 from app.pipeline.stage2_cross_chapter_synthesis import GlobalAnalysis
@@ -16,8 +18,63 @@ from app.pipeline.stage4_scene_generation import GeneratedScene
 
 router = APIRouter(prefix="/api")
 
+
+def _text_path(project_id: str) -> str:
+    return TEXT_STORE_DIR / f"{project_id}.txt"
+
+
+def _save_text(project_id: str, text: str):
+    _text_path(project_id).write_text(text, encoding="utf-8")
+
+
+def _load_text(project_id: str) -> str:
+    p = _text_path(project_id)
+    if p.exists():
+        return p.read_text(encoding="utf-8")
+    return ""
+
+
+def _render_import_result(title: str, stats: dict) -> HTMLResponse:
+    """Generate HTML status card for HTMX upload/paste responses."""
+    # 暗色主题兼容：使用半透明深色背景 + 高可读性文字颜色
+    is_error = bool(stats.get("errors"))
+    accent_color = "#f87171" if is_error else "#34d399"   # red / green
+    accent_bg = "rgba(239,68,68,0.1)" if is_error else "rgba(16,185,129,0.1)"
+    accent_border = "rgba(239,68,68,0.25)" if is_error else "rgba(16,185,129,0.25)"
+    title_color = "#fca5a5" if is_error else "#34d399"
+    icon = stats.get("icon", "⚠️" if is_error else "✅")
+
+    errors_html = ""
+    if stats.get("errors"):
+        items = "".join(f"<li>{e}</li>" for e in stats["errors"])
+        errors_html = (
+            f'<div style="margin-top:0.75em;padding:0.75em;'
+            f'background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);'
+            f'border-radius:6px;font-size:0.9em;color:#fbbf24">'
+            f'<strong>⚠ 警告：</strong><ul style="margin:0.25em 0 0;padding-left:1.25em">{items}</ul>'
+            f'</div>'
+        )
+
+    items_html = "".join(
+        f"<div style=\"display:flex;justify-content:space-between;"
+        f"padding:0.4em 0;border-bottom:1px solid rgba(255,255,255,0.06)\">"
+        f"<span style=\"color:#a0a0b8;font-size:0.9em\">{k}</span>"
+        f"<strong style=\"color:#e8e8f0;font-size:0.95em\">{v}</strong></div>"
+        for k, v in stats.get("items", [])
+    )
+
+    return HTMLResponse(content=f"""<div id="upload-result" style="background:{accent_bg};border:1px solid {accent_border};border-radius:var(--radius);padding:1em;margin-top:0.5em;animation:scaleIn 0.3s ease">
+<div style="display:flex;align-items:center;gap:0.5em;margin-bottom:0.75em">
+    <span style="font-size:1.5em">{icon}</span>
+    <strong style="font-size:1.05em;color:{title_color}">{title}</strong>
+</div>
+{items_html}
+{errors_html}
+</div>""")
+
 @router.post("/projects")
 async def create_project(
+    request: Request,
     title: str = Form(...),
     source_novel: str = Form(""),
     source_author: str = Form(""),
@@ -32,10 +89,59 @@ async def create_project(
     db.add(project)
     db.commit()
     db.refresh(project)
+
+    # HTMX request → return HTML modal fragment
+    if request.headers.get("HX-Request"):
+        # 内联 SVG 庆祝动画 — 不依赖外部资源
+        return HTMLResponse(content=f"""<div id="create-modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;animation:fadeIn 0.2s ease">
+<div id="create-modal" style="background:linear-gradient(145deg,#1a1a35,#1f1f40);border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:2em;text-align:center;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.5),0 0 40px rgba(99,102,241,0.15);animation:scaleIn 0.3s ease">
+<div style="margin-bottom:0.75em;display:flex;justify-content:center">
+    <svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <linearGradient id="checkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#6366f1"/>
+                <stop offset="100%" style="stop-color:#8b5cf6"/>
+            </linearGradient>
+            <filter id="glow">
+                <feGaussianBlur stdDeviation="2" result="blur"/>
+                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+        </defs>
+        <circle cx="50" cy="50" r="48" fill="none" stroke="url(#checkGrad)" stroke-width="3" opacity="0.3">
+            <animate attributeName="r" values="48;52;48" dur="2s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="0.3;0.6;0.3" dur="2s" repeatCount="indefinite"/>
+        </circle>
+        <circle cx="50" cy="50" r="42" fill="rgba(99,102,241,0.1)"/>
+        <path d="M35 52 L45 62 L65 40" fill="none" stroke="url(#checkGrad)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+            <animate attributeName="stroke-dasharray" values="0,100;100,0" dur="0.6s" fill="freeze"/>
+        </path>
+    </svg>
+</div>
+<h2 style="margin:0.25em 0;font-size:1.25em;color:#e8e8f0">项目创建成功！🎉</h2>
+<p style="color:#a0a0b8;margin-bottom:1.5em;font-size:0.95em">「{title}」已就绪</p>
+<div style="display:flex;gap:0.5em;justify-content:center">
+<a href="/projects/{project.id}" style="display:inline-flex;align-items:center;gap:0.3em;padding:0.55em 1.25em;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-radius:8px;text-decoration:none;font-size:0.95em;font-weight:600">🚀 前往项目工作台</a>
+<button onclick="document.getElementById('create-modal-overlay').remove()" style="padding:0.55em 1.25em;background:rgba(255,255,255,0.06);color:#a0a0b8;border:1px solid rgba(255,255,255,0.1);border-radius:8px;cursor:pointer;font-size:0.95em">✕ 关闭</button>
+</div>
+</div>
+</div>
+<script>
+setTimeout(function() {{
+    var overlay = document.getElementById('create-modal-overlay');
+    if (overlay) {{
+        overlay.style.transition = 'opacity 0.3s';
+        overlay.style.opacity = '0';
+        setTimeout(function() {{ if (overlay.parentNode) overlay.remove(); }}, 300);
+    }}
+}}, 4000);
+</script>
+""")
+
     return {"id": project.id, "title": project.title}
 
 @router.post("/projects/{project_id}/upload")
-async def upload_file(project_id: str, file: UploadFile = File(...),
+async def upload_file(project_id: str, request: Request,
+                      file: UploadFile = File(...),
                       db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -47,6 +153,7 @@ async def upload_file(project_id: str, file: UploadFile = File(...),
     if filename.endswith(".docx"):
         from app.pipeline.stage0_preprocess import preprocess_docx
         result = preprocess_docx(content)
+        text = ""
     elif filename.endswith(".md"):
         text = content.decode("utf-8", errors="replace")
         from app.pipeline.stage0_preprocess import preprocess_markdown
@@ -56,13 +163,29 @@ async def upload_file(project_id: str, file: UploadFile = File(...),
         from app.pipeline.stage0_preprocess import preprocess_text
         result = preprocess_text(text)
 
-    return {
+    # Save text so pipeline can read it later
+    _save_text(project_id, text)
+
+    resp_data = {
         "filename": filename,
         "chapters": len(result.chapters),
         "total_chars": result.total_chars,
         "title": result.title,
         "errors": result.errors,
     }
+
+    if request.headers.get("HX-Request"):
+        return _render_import_result("导入成功！", {
+            "icon": "✅",
+            "items": [
+                ("文件名", filename),
+                ("章节数", f"{len(result.chapters)} 章"),
+                ("总字数", f"{result.total_chars:,}"),
+            ],
+            "errors": result.errors,
+        })
+
+    return resp_data
 
 @router.post("/projects/{project_id}/paste")
 async def paste_text(project_id: str, request: Request,
@@ -71,21 +194,50 @@ async def paste_text(project_id: str, request: Request,
     if not project:
         raise HTTPException(404, "项目不存在")
 
-    body = await request.json()
-    text = body.get("text", "")
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        body = await request.json()
+        text = body.get("text", "")
+    else:
+        form = await request.form()
+        text = form.get("text", "")
     if len(text) > 500_000:
         raise HTTPException(400, "文本超过 50 万字上限")
 
     from app.pipeline.stage0_preprocess import preprocess_text
     result = preprocess_text(text)
 
-    return {
+    # Save text so pipeline can read it later
+    _save_text(project_id, text)
+
+    resp_data = {
         "chapters": len(result.chapters),
         "total_chars": result.total_chars,
         "title": result.title,
         "errors": result.errors,
         "text": text,
     }
+
+    if request.headers.get("HX-Request"):
+        return _render_import_result("解析完成！", {
+            "icon": "✅",
+            "items": [
+                ("章节数", f"{len(result.chapters)} 章"),
+                ("总字数", f"{result.total_chars:,}"),
+            ],
+            "errors": result.errors,
+        })
+
+    return resp_data
+
+
+@router.get("/projects/{project_id}/text")
+async def get_text(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    text = _load_text(project_id)
+    return {"text": text, "project_id": project_id}
 
 @router.post("/projects/{project_id}/run")
 async def run_pipeline_endpoint(project_id: str, request: Request,
@@ -95,7 +247,9 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
         raise HTTPException(404, "项目不存在")
 
     body = await request.json()
-    text = body.get("text", "")
+    text = body.get("text", "") or _load_text(project_id)
+    if text:
+        _save_text(project_id, text)
     if not text:
         raise HTTPException(400, "请先上传或粘贴小说文本")
 
@@ -116,11 +270,15 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
     db.add(run)
     db.commit()
 
+    import time as _time
+    _start_time = _time.time()
+
     async def event_stream():
         queue: asyncio.Queue = asyncio.Queue()
         pipeline_state = None
 
         async def progress_callback(msg):
+            msg["elapsed"] = round(_time.time() - _start_time, 1)
             await queue.put(msg)
 
         async def run_pipeline_task():
@@ -163,6 +321,7 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
         while not task.done() or not queue.empty():
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=0.5)
+                _inject_percent(msg)
                 yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
             except asyncio.TimeoutError:
                 yield ": keepalive\n\n"
@@ -172,10 +331,15 @@ async def run_pipeline_endpoint(project_id: str, request: Request,
         project.status = "done" if not pipeline_state.errors else "error"
         db.commit()
 
+        assembly = pipeline_state.stage_results.get("assembly")
+        total_elapsed = round(_time.time() - _start_time, 1)
         final_msg = {
             "status": "complete",
+            "percent": 100,
+            "elapsed": total_elapsed,
             "errors": pipeline_state.errors,
-            "yaml_text": pipeline_state.stage_results.get("assembly").yaml_text if pipeline_state.stage_results.get("assembly") else "",
+            "yaml_text": assembly.yaml_text if assembly else "",
+            "screenplay_text": assembly.screenplay_text if assembly else "",
         }
         yield f"data: {json.dumps(final_msg, ensure_ascii=False)}\n\n"
 
@@ -218,7 +382,12 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
 
     run_id = run.id  # save before detach
     body_data = await request.json()
-    input_text = body_data.get("text", "")
+    input_text = body_data.get("text", "") or _load_text(project_id)
+    if input_text:
+        _save_text(project_id, input_text)
+
+    import time as _time_stage
+    _stage_start = _time_stage.time()
 
     async def event_stream():
         queue: asyncio.Queue = asyncio.Queue()
@@ -229,6 +398,7 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
                 "current_stage": stage,
                 "stage_status": {stage: "running"},
                 "message": msg,
+                "elapsed": round(_time_stage.time() - _stage_start, 1),
             })
 
         async def cache_get(pid, stg, input_hash):
@@ -273,7 +443,7 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
                     raise ValueError("请先运行 Stage 0")
                 if not input_text:
                     raise ValueError("请提供小说文本")
-                return await run_stage_1(project_id, input_text, s0.chapters, provider, notify, cache_get, cache_put)
+                return await run_stage_1(project_id, input_text, s0.chapters, provider, notify, None, cache_get, cache_put)
 
             elif stage == 2:
                 s1 = _get_latest_cached(db, project_id, 1)
@@ -283,8 +453,11 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
 
             elif stage == 3:
                 s2 = _get_latest_cached(db, project_id, 2)
+                s0 = _get_latest_cached(db, project_id, 0)
                 if s2 is None:
                     raise ValueError("请先运行 Stage 2")
+                if s0:
+                    config["num_chapters"] = len(s0.chapters)
                 return await run_stage_3(project_id, s2, config, provider, notify, cache_get, cache_put)
 
             elif stage == 4:
@@ -294,8 +467,8 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
                 if s2 is None or s3 is None or s0 is None:
                     raise ValueError("请先运行 Stage 0-3")
                 chapter_texts = {ch.index: ch.content for ch in s0.chapters}
-                return await run_stage_4(project_id, s3, s2.characters, chapter_texts,
-                                         provider, notify, cache_get, cache_put)
+                return await run_stage_4(project_id, s3, s2.characters, chapter_texts, None,
+                                         provider, notify, None, cache_get, cache_put)
 
             elif stage == 5:
                 s2 = _get_latest_cached(db, project_id, 2)
@@ -303,6 +476,13 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
                 s4 = _get_latest_cached(db, project_id, 4)
                 if s2 is None or s3 is None or s4 is None:
                     raise ValueError("请先运行 Stage 0-4")
+                empty_scenes = [s for s in s4 if not s.content]
+                if empty_scenes:
+                    names = ", ".join(s.id for s in empty_scenes)
+                    raise ValueError(
+                        f"{len(empty_scenes)}/{len(s4)} 个场景内容为空（{names}）。"
+                        f" 请清除 Stage 4 缓存后重试。"
+                    )
                 return await run_stage_5(project_id, meta, config, s2, s3, s4,
                                          notify, cache_get, cache_put)
 
@@ -313,6 +493,7 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
         while not task.done() or not queue.empty():
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=0.5)
+                _inject_percent(msg)
                 yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
             except asyncio.TimeoutError:
                 yield ": keepalive\n\n"
@@ -354,9 +535,11 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
 
         db.commit()
 
-        final_msg = {"status": "complete", "stage": stage}
+        total_elapsed_stage = round(_time_stage.time() - _stage_start, 1)
+        final_msg = {"status": "complete", "stage": stage, "percent": min((stage + 1) * 100 // 6, 100), "elapsed": total_elapsed_stage}
         if stage == 5 and hasattr(result, 'yaml_text'):
             final_msg["yaml_text"] = result.yaml_text
+            final_msg["screenplay_text"] = getattr(result, 'screenplay_text', '')
         yield f"data: {json.dumps(final_msg, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -396,14 +579,100 @@ def _get_latest_cached(db: Session, project_id: str, stage: int):
     return None
 
 
+def _get_assembly_data(project_id: str, db: Session) -> dict:
+    """从 Stage 5 缓存中读取装配结果。"""
+    cache_row = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == 5,
+    ).order_by(StageCache.created_at.desc()).first()
+
+    if cache_row and cache_row.output_json:
+        try:
+            return json.loads(cache_row.output_json)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {}
+
+
 @router.get("/projects/{project_id}/script.yaml")
-async def download_script(project_id: str, yaml_text: str = "",
-                          db: Session = Depends(get_db)):
+async def download_script_yaml(project_id: str, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(404, "项目不存在")
+
+    data = _get_assembly_data(project_id, db)
+    yaml_text = data.get("yaml_text", "")
+
+    if not yaml_text:
+        raise HTTPException(404, "剧本 YAML 尚未生成，请先运行流水线")
+
+    safe_name = quote(project.title, safe="")
     return PlainTextResponse(yaml_text, media_type="application/x-yaml",
-                             headers={"Content-Disposition": f"attachment; filename={project.title}.yaml"})
+                             headers={"Content-Disposition":
+                                      f"attachment; filename*=UTF-8''{safe_name}.yaml"})
+
+
+@router.get("/projects/{project_id}/script.pdf")
+async def download_script_pdf(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    data = _get_assembly_data(project_id, db)
+    yaml_text = data.get("yaml_text", "")
+
+    if not yaml_text:
+        raise HTTPException(404, "剧本尚未生成，请先运行流水线")
+
+    import yaml as _yaml
+    from app.pipeline.pdf_export import generate_screenplay_pdf
+    try:
+        parsed = _yaml.safe_load(yaml_text)
+        if not isinstance(parsed, dict):
+            raise HTTPException(400, "YAML 数据格式无效")
+        pdf_bytes = generate_screenplay_pdf(parsed, title=project.title)
+    except Exception as e:
+        raise HTTPException(500, f"PDF 生成失败: {e}")
+
+    safe_name = quote(project.title, safe="")
+    return Response(content=bytes(pdf_bytes), media_type="application/pdf",
+                    headers={"Content-Disposition":
+                             f"attachment; filename*=UTF-8''{safe_name}.pdf"})
+
+
+@router.put("/projects/{project_id}/stage/5")
+async def save_edited_script(project_id: str, request: Request,
+                              db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    body = await request.json()
+    yaml_text = body.get("yaml_text", "")
+    screenplay_text = body.get("screenplay_text", "")
+
+    cache_row = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == 5,
+    ).order_by(StageCache.created_at.desc()).first()
+
+    if not cache_row:
+        raise HTTPException(404, "剧本尚未生成，无法保存")
+
+    # Update the text fields inside the cached output_json
+    try:
+        data = json.loads(cache_row.output_json)
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    if yaml_text:
+        data["yaml_text"] = yaml_text
+    if screenplay_text:
+        data["screenplay_text"] = screenplay_text
+    cache_row.output_json = json.dumps(data, ensure_ascii=False)
+    db.commit()
+
+    return {"status": "saved"}
+
 
 # ── Cache helpers ────────────────────────────────────────────────────
 
@@ -431,6 +700,8 @@ def _deserialize_stage_result(stage: int, data: str):
         return [GeneratedScene(**item) for item in d]
     elif stage == 5:
         from app.pipeline.stage5_assembly import AssemblyResult
+        # screenplay_text may not exist in old cached data
+        d.setdefault("screenplay_text", "")
         return AssemblyResult(**d)
     return d
 
@@ -463,6 +734,42 @@ async def get_stage_result(project_id: str, stage: int, db: Session = Depends(ge
         return {"stage": stage, "status": "error", "data": None}
 
 
+@router.get("/projects/{project_id}/pipeline-status")
+async def get_pipeline_status(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    status_map = {}
+    for stage in range(6):
+        row = db.query(StageCache).filter(
+            StageCache.project_id == project_id,
+            StageCache.stage == stage,
+        ).order_by(StageCache.created_at.desc()).first()
+        status_map[str(stage)] = "cached" if row else "pending"
+
+    next_stage = None
+    for s in range(6):
+        if status_map[str(s)] == "pending":
+            next_stage = s
+            break
+    is_complete = next_stage is None and all(v == "cached" for v in status_map.values())
+
+    # Check if there's an error in the latest run
+    last_run = db.query(PipelineRun).filter(
+        PipelineRun.project_id == project_id
+    ).order_by(PipelineRun.started_at.desc()).first()
+    last_error = last_run.error_message if last_run and last_run.error_message else None
+
+    return {
+        "stages": status_map,
+        "next_stage": next_stage,
+        "is_complete": is_complete,
+        "project_status": project.status,
+        "last_error": last_error,
+    }
+
+
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -471,3 +778,422 @@ async def delete_project(project_id: str, db: Session = Depends(get_db)):
     db.delete(project)
     db.commit()
     return {"deleted": project_id}
+
+
+@router.post("/projects/{project_id}/clear-cache")
+async def clear_cache(project_id: str, stage: int = None,
+                       db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    q = db.query(StageCache).filter(StageCache.project_id == project_id)
+    if stage is not None:
+        q = q.filter(StageCache.stage == stage)
+    count = q.count()
+    q.delete()
+    db.commit()
+    return {"cleared": count, "stage": stage}
+
+
+# ── Stage 3 场景编排 API ──────────────────────────────────────────
+
+def _renumber_scenes(scenes_data: list) -> list:
+    """按 episode 分组后自动重新编号 sequence 和 id。"""
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for s in scenes_data:
+        ep = s.get("episode", 1) if isinstance(s, dict) else getattr(s, "episode", 1)
+        groups[ep].append(s)
+
+    result = []
+    global_seq = 1
+    for ep in sorted(groups):
+        for i, s in enumerate(groups[ep], 1):
+            if isinstance(s, dict):
+                s["sequence"] = i
+                s["id"] = f"scene_{global_seq:03d}"
+            else:
+                s.sequence = i
+                s.id = f"scene_{global_seq:03d}"
+            global_seq += 1
+            result.append(s)
+    return result
+
+
+@router.get("/projects/{project_id}/scenes")
+async def get_scenes(project_id: str, db: Session = Depends(get_db)):
+    """返回 Stage 3 场景列表 JSON，供看板使用。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    structure = _get_latest_cached(db, project_id, 3)
+    if structure is None:
+        return {"script_type": project.script_type, "scenes": [], "episode_summaries": []}
+
+    scenes_data = [asdict(s) for s in structure.scenes]
+    return {
+        "script_type": structure.script_type,
+        "scenes": scenes_data,
+        "episode_summaries": structure.episode_summaries,
+        "beat_sheet": structure.beat_sheet,
+    }
+
+
+@router.put("/projects/{project_id}/scenes")
+async def save_scenes(project_id: str, request: Request, db: Session = Depends(get_db)):
+    """保存完整的场景列表（原子操作），自动重新编号。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    body = await request.json()
+    incoming_scenes = body.get("scenes", [])
+
+    # 自动重新编号
+    renumbered = _renumber_scenes(incoming_scenes)
+
+    # 查找 Stage 3 缓存行
+    cache_row = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == 3,
+    ).order_by(StageCache.created_at.desc()).first()
+
+    if not cache_row:
+        # 如果没有缓存，创建一个新的（罕见但安全处理）
+        cache_row = StageCache(project_id=project_id, stage=3, input_hash="manual")
+        db.add(cache_row)
+
+    # 重建 ScriptStructure
+    structure = _get_latest_cached(db, project_id, 3)
+    if structure is None:
+        structure = ScriptStructure(script_type=project.script_type)
+
+    structure.scenes = [ScenePlan(**s) for s in renumbered]
+    # 更新 episode_summaries（如果前端传了）
+    if "episode_summaries" in body:
+        structure.episode_summaries = body["episode_summaries"]
+
+    cache_row.output_json = _serialize_stage_result(structure)
+    db.commit()
+
+    return {
+        "status": "saved",
+        "scene_count": len(structure.scenes),
+        "scenes": [asdict(s) for s in structure.scenes],
+    }
+
+
+@router.post("/projects/{project_id}/scenes/split/{scene_id}")
+async def split_scene(project_id: str, scene_id: str, request: Request,
+                      db: Session = Depends(get_db)):
+    """拆分场景为两个。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    body = await request.json()
+    split_desc = body.get("split_description", "前半部分")
+
+    structure = _get_latest_cached(db, project_id, 3)
+    if structure is None:
+        raise HTTPException(400, "请先运行 Stage 3")
+
+    target_idx = None
+    for i, s in enumerate(structure.scenes):
+        if s.id == scene_id:
+            target_idx = i
+            break
+
+    if target_idx is None:
+        raise HTTPException(404, f"场景 {scene_id} 不存在")
+
+    original = structure.scenes[target_idx]
+
+    # 创建两个新场景（前半/后半）
+    first_half = ScenePlan(
+        id="",  # 由 renumber 生成
+        act=original.act,
+        episode=original.episode,
+        sequence=original.sequence,
+        location=original.location,
+        time=original.time,
+        setting_description=f"（拆分前段：{split_desc}）",
+        characters_present=list(original.characters_present),
+        summary=f"{original.summary}\n（前半：{split_desc}）",
+        source_chapter=original.source_chapter,
+    )
+
+    second_half = ScenePlan(
+        id="",
+        act=original.act,
+        episode=original.episode,
+        sequence=original.sequence + 1,
+        location=original.location,
+        time=original.time,
+        setting_description="（拆分后段）",
+        characters_present=list(original.characters_present),
+        summary=f"{original.summary}\n（后半）",
+        source_chapter=original.source_chapter,
+    )
+
+    # 替换原场景为两个新场景
+    structure.scenes[target_idx:target_idx + 1] = [first_half, second_half]
+    _renumber_scenes(structure.scenes)
+
+    # 保存
+    cache_row = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == 3,
+    ).order_by(StageCache.created_at.desc()).first()
+    if cache_row:
+        cache_row.output_json = _serialize_stage_result(structure)
+        db.commit()
+
+    return {
+        "status": "split",
+        "scenes": [asdict(s) for s in structure.scenes],
+    }
+
+
+@router.post("/projects/{project_id}/scenes/merge")
+async def merge_scenes(project_id: str, request: Request, db: Session = Depends(get_db)):
+    """合并两个场景为一个。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    body = await request.json()
+    scene_ids = body.get("scene_ids", [])
+
+    if len(scene_ids) != 2:
+        raise HTTPException(400, "请选择恰好 2 个场景进行合并")
+
+    structure = _get_latest_cached(db, project_id, 3)
+    if structure is None:
+        raise HTTPException(400, "请先运行 Stage 3")
+
+    idx_map = {}
+    for i, s in enumerate(structure.scenes):
+        idx_map[s.id] = i
+
+    if scene_ids[0] not in idx_map or scene_ids[1] not in idx_map:
+        raise HTTPException(404, "场景不存在")
+
+    idx_a, idx_b = idx_map[scene_ids[0]], idx_map[scene_ids[1]]
+    if idx_a > idx_b:
+        idx_a, idx_b = idx_b, idx_a
+        scene_ids[0], scene_ids[1] = scene_ids[1], scene_ids[0]
+
+    scene_a = structure.scenes[idx_a]
+    scene_b = structure.scenes[idx_b]
+
+    # 合并 characters_present（去重）
+    merged_chars = list(dict.fromkeys(scene_a.characters_present + scene_b.characters_present))
+
+    merged = ScenePlan(
+        id="",
+        act=scene_a.act,
+        episode=scene_a.episode,
+        sequence=scene_a.sequence,
+        location=scene_a.location or scene_b.location,
+        time=scene_a.time or scene_b.time,
+        setting_description=f"{scene_a.setting_description}\n{scene_b.setting_description}".strip(),
+        characters_present=merged_chars,
+        summary=f"{scene_a.summary}\n——\n{scene_b.summary}",
+        source_chapter=scene_a.source_chapter or scene_b.source_chapter,
+    )
+
+    # 先删后面的，再删前面的
+    del structure.scenes[idx_b]
+    del structure.scenes[idx_a]
+    # 在 idx_a 位置插入合并结果
+    structure.scenes.insert(idx_a, merged)
+    _renumber_scenes(structure.scenes)
+
+    cache_row = db.query(StageCache).filter(
+        StageCache.project_id == project_id,
+        StageCache.stage == 3,
+    ).order_by(StageCache.created_at.desc()).first()
+    if cache_row:
+        cache_row.output_json = _serialize_stage_result(structure)
+        db.commit()
+
+    return {
+        "status": "merged",
+        "merged_id": merged.id,
+        "scenes": [asdict(s) for s in structure.scenes],
+    }
+
+
+# ── Character Relationship Graph API ─────────────────────────────────
+
+_IMPORTANCE_MAP = {
+    "protagonist": 4,
+    "antagonist": 3,
+    "supporting": 2,
+    "cameo": 1,
+}
+
+_RELATION_COLORS = {
+    "恋人": "#f472b6",
+    "夫妻": "#f472b6",
+    "情侣": "#f472b6",
+    "师徒": "#a78bfa",
+    "师傅": "#a78bfa",
+    "师父": "#a78bfa",
+    "徒弟": "#a78bfa",
+    "仇敌": "#ef4444",
+    "敌人": "#ef4444",
+    "对手": "#ef4444",
+    "情敌": "#ef4444",
+    "朋友": "#34d399",
+    "好友": "#34d399",
+    "同伴": "#34d399",
+    "父子": "#f59e0b",
+    "母子": "#f59e0b",
+    "父女": "#f59e0b",
+    "母女": "#f59e0b",
+    "兄弟": "#f59e0b",
+    "姐妹": "#f59e0b",
+    "兄妹": "#f59e0b",
+    "姐弟": "#f59e0b",
+    "亲属": "#f59e0b",
+    "主仆": "#60a5fa",
+    "上下级": "#60a5fa",
+}
+
+
+def _pick_rel_color(rel_type: str) -> str:
+    """Match relationship type to a color, with partial matching."""
+    for key, color in _RELATION_COLORS.items():
+        if key in rel_type:
+            return color
+    return "#94a3b8"  # default gray
+
+
+@router.get("/projects/{project_id}/character-graph")
+async def get_character_graph(project_id: str, db: Session = Depends(get_db)):
+    """返回角色关系图谱数据（角色 + 关系 + 出场统计 + 关键台词）。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    # Load Stage 2: characters + relationships
+    s2 = _get_latest_cached(db, project_id, 2)
+    if s2 is None:
+        return {"characters": [], "relationships": [], "status": "no_data"}
+
+    # Load Stage 1: chapter analyses for appearance counts + key quotes
+    s1 = _get_latest_cached(db, project_id, 1)
+
+    # Build appearance count map from Stage 1
+    appear_count: dict[str, int] = {}
+    key_quotes_map: dict[str, list] = {}
+    if s1:
+        for ca in s1:
+            for nc in ca.new_characters:
+                name = nc.get("name", "") if isinstance(nc, dict) else getattr(nc, "name", "")
+                if name:
+                    appear_count[name] = appear_count.get(name, 0) + 1
+            # Collect dialogue excerpts for key quotes
+            for d in ca.dialogue_excerpts:
+                speaker = d.get("speaker", "") if isinstance(d, dict) else getattr(d, "speaker", "")
+                text = d.get("text", "") if isinstance(d, dict) else getattr(d, "text", "")
+                if speaker and text:
+                    if speaker not in key_quotes_map:
+                        key_quotes_map[speaker] = []
+                    if len(key_quotes_map[speaker]) < 3:  # keep max 3 quotes
+                        key_quotes_map[speaker].append(text)
+
+    # Enrich characters
+    characters_out = []
+    for c in s2.characters:
+        char_dict = c if isinstance(c, dict) else asdict(c) if hasattr(c, '__dataclass_fields__') else c
+        name = char_dict.get("name", "")
+        role = char_dict.get("role", "supporting")
+        # Try matching by name or aliases for appearance count
+        count = appear_count.get(name, 0)
+        if count == 0:
+            for alias in char_dict.get("aliases", []):
+                if appear_count.get(alias, 0) > count:
+                    count = appear_count[alias]
+        quotes = key_quotes_map.get(name, [])
+        if not quotes:
+            for alias in char_dict.get("aliases", []):
+                if key_quotes_map.get(alias):
+                    quotes = key_quotes_map[alias]
+                    break
+
+        characters_out.append({
+            "name": name,
+            "aliases": char_dict.get("aliases", []),
+            "role": role,
+            "description": char_dict.get("description", ""),
+            "traits": char_dict.get("traits", []),
+            "first_appearance_chapter": char_dict.get("first_appearance_chapter", 1),
+            "appearance_count": count,
+            "key_quotes": quotes,
+            "importance": _IMPORTANCE_MAP.get(role, 1),
+        })
+
+    # Enrich relationships
+    relationships_out = []
+    for r in s2.relationships:
+        rel_dict = r if isinstance(r, dict) else asdict(r) if hasattr(r, '__dataclass_fields__') else r
+        rel_type = rel_dict.get("type", "其他")
+        relationships_out.append({
+            "from": rel_dict.get("from", ""),
+            "to": rel_dict.get("to", ""),
+            "type": rel_type,
+            "description": rel_dict.get("description", ""),
+            "color": _pick_rel_color(rel_type),
+        })
+
+    return {
+        "status": "ok",
+        "characters": characters_out,
+        "relationships": relationships_out,
+    }
+
+
+@router.post("/projects/{project_id}/scenes/run-stage4")
+async def run_stage4_from_kanban(project_id: str, db: Session = Depends(get_db)):
+    """从看板直接触发 Stage 4 运行（返回 SSE 流端点 URL）。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "项目不存在")
+
+    structure = _get_latest_cached(db, project_id, 3)
+    if structure is None or not structure.scenes:
+        raise HTTPException(400, "没有场景数据，请先运行或编辑 Stage 3")
+
+    return {
+        "status": "ready",
+        "scene_count": len(structure.scenes),
+        "run_url": f"/api/projects/{project_id}/run-stage/4",
+    }
+
+
+def _inject_percent(msg: dict):
+    """Add percent field based on completed stages.
+
+    如果 executor 已经设置了细粒度的 percent 字段，直接使用；
+    否则回退到旧的阶段计数方式（每阶段 16.67%）。
+    """
+    # 新系统已在 executor 中设置了 percent，无需覆盖
+    if "percent" in msg:
+        return
+
+    stage_status = msg.get("stage_status", {})
+    if stage_status:
+        done = sum(1 for v in stage_status.values() if v == "done")
+        current = msg.get("current_stage", -1)
+        if done == 0 and current >= 0:
+            # Step-by-step mode: only current stage in status, assume previous stages done
+            msg["percent"] = min(current * 100 // 6, 100)
+        else:
+            msg["percent"] = min(done * 100 // 6, 100)
+    elif msg.get("status") == "complete" and "stage" in msg:
+        # Single-stage completion message
+        msg["percent"] = (msg["stage"] + 1) * 100 // 6

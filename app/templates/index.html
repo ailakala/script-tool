@@ -10,10 +10,19 @@
             <span class="badge">{{ p.script_type }}</span>
             <span class="status {{ p.status }}">{{ p.status }}</span>
             <time>{{ p.updated_at[:10] if p.updated_at }}</time>
+            <button class="btn-danger"
+                    hx-delete="/api/projects/{{ p.id }}"
+                    hx-confirm="确定要删除项目「{{ p.title }}」吗？此操作不可撤销。"
+                    hx-target="closest .project-card"
+                    hx-swap="delete"
+                    style="margin-left:auto">删除</button>
         </div>
         {% endfor %}
     {% else %}
-        <p class="empty">还没有项目。<a href="/projects/new">创建第一个</a></p>
+        <div class="empty">
+            <p style="font-size:1.1em;margin-bottom:0.5em">还没有项目</p>
+            <a href="/projects/new" class="btn" style="display:inline-flex;text-decoration:none">创建第一个项目</a>
+        </div>
     {% endif %}
 </div>
 {% endblock %}
