@@ -1,8 +1,9 @@
 import json
 import asyncio
 from dataclasses import asdict
+from urllib.parse import quote
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse, PlainTextResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, PlainTextResponse, HTMLResponse, Response
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import Project, PipelineRun, StageCache
@@ -557,42 +558,38 @@ async def download_script_yaml(project_id: str, db: Session = Depends(get_db)):
     if not yaml_text:
         raise HTTPException(404, "剧本 YAML 尚未生成，请先运行流水线")
 
+    safe_name = quote(project.title, safe="")
     return PlainTextResponse(yaml_text, media_type="application/x-yaml",
-                             headers={"Content-Disposition": f"attachment; filename={project.title}.yaml"})
+                             headers={"Content-Disposition":
+                                      f"attachment; filename*=UTF-8''{safe_name}.yaml"})
 
 
-@router.get("/projects/{project_id}/script.txt")
-async def download_script_txt(project_id: str, db: Session = Depends(get_db)):
+@router.get("/projects/{project_id}/script.pdf")
+async def download_script_pdf(project_id: str, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(404, "项目不存在")
 
     data = _get_assembly_data(project_id, db)
-    screenplay_text = data.get("screenplay_text", "")
+    yaml_text = data.get("yaml_text", "")
 
-    # 兼容旧缓存：如果没有 screenplay_text，尝试从 yaml_text 提取 scene_text 拼凑
-    if not screenplay_text:
-        yaml_text = data.get("yaml_text", "")
-        if not yaml_text:
-            raise HTTPException(404, "剧本尚未生成，请先运行流水线")
-        # 从 YAML 中提取 scene_text 作为兜底
-        import yaml as _yaml
-        try:
-            parsed = _yaml.safe_load(yaml_text)
-            texts = []
-            for scene in parsed.get("scenes", []):
-                st = scene.get("scene_text", "")
-                if st:
-                    texts.append(st)
-            if texts:
-                screenplay_text = "标题：《" + project.title + "》\n\n" + "\n\n".join(texts) + "\n\n剧终"
-            else:
-                screenplay_text = yaml_text  # 实在没有就用 YAML 原文
-        except Exception:
-            screenplay_text = yaml_text
+    if not yaml_text:
+        raise HTTPException(404, "剧本尚未生成，请先运行流水线")
 
-    return PlainTextResponse(screenplay_text, media_type="text/plain; charset=utf-8",
-                             headers={"Content-Disposition": f"attachment; filename={project.title}.txt"})
+    import yaml as _yaml
+    from app.pipeline.pdf_export import generate_screenplay_pdf
+    try:
+        parsed = _yaml.safe_load(yaml_text)
+        if not isinstance(parsed, dict):
+            raise HTTPException(400, "YAML 数据格式无效")
+        pdf_bytes = generate_screenplay_pdf(parsed, title=project.title)
+    except Exception as e:
+        raise HTTPException(500, f"PDF 生成失败: {e}")
+
+    safe_name = quote(project.title, safe="")
+    return Response(content=bytes(pdf_bytes), media_type="application/pdf",
+                    headers={"Content-Disposition":
+                             f"attachment; filename*=UTF-8''{safe_name}.pdf"})
 
 
 @router.put("/projects/{project_id}/stage/5")

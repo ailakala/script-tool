@@ -30,13 +30,6 @@
     <main class="container">
         {% block content %}{% endblock %}
     </main>
-    <script>
-    fetch('/health').catch(function(){});
-    setInterval(function() {
-        fetch('/health').catch(function(){});
-    }, 3000);
-    </script>
-
     <script src="/static/js/particles.js"></script>
 </body>
 </html>

@@ -68,7 +68,7 @@
         <h2>📄 查看结果</h2>
         <div class="flex gap-1">
             <a href="/projects/{{ project.id }}/script" class="btn" style="display:inline-flex;text-decoration:none">📝 查看/编辑剧本</a>
-            <button onclick="downloadScript()" class="btn-secondary">⬇ 下载 TXT</button>
+            <button onclick="downloadPDF()" class="btn-secondary">⬇ 下载 PDF</button>
             <button onclick="downloadYAML()" class="btn-secondary">⬇ 下载 YAML</button>
         </div>
     </div>
@@ -351,8 +351,8 @@ function showResult(text) {
     panel.appendChild(pre);
 }
 
-function downloadScript() {
-    window.open('/api/projects/{{ project.id }}/script.txt', '_blank');
+function downloadPDF() {
+    window.open('/api/projects/{{ project.id }}/script.pdf', '_blank');
 }
 
 function downloadYAML() {
