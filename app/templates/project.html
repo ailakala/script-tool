@@ -79,7 +79,6 @@
         <h2>📄 查看结果</h2>
         <div class="flex gap-1" style="flex-wrap:wrap">
             <a href="/projects/{{ project.id }}/script" class="btn" style="display:inline-flex;text-decoration:none">📝 查看/编辑剧本</a>
-            <a href="/projects/{{ project.id }}/characters" class="btn btn-secondary" style="display:inline-flex;text-decoration:none">🕸 人物关系图谱</a>
             <button onclick="downloadPDF()" class="btn-secondary">⬇ 下载 PDF</button>
             <button onclick="downloadYAML()" class="btn-secondary">⬇ 下载 YAML</button>
         </div>
@@ -409,10 +408,6 @@ async function runPipeline() {
                     warnDiv.style.display = 'block';
                     warnDiv.innerHTML = msg.errors.map(function(e) { return '⚠ ' + e; }).join('<br>');
                 }
-            }
-            var timeP = document.getElementById('completion-time');
-            if (timeP && msg.elapsed) {
-                timeP.textContent = '全部 6 个阶段已处理完毕，耗时 ' + formatElapsed(msg.elapsed);
             }
             showCompletionToast();
             if (msg.screenplay_text || msg.yaml_text) {

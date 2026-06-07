@@ -140,18 +140,9 @@ async def run_stage_4(project_id: str, structure: ScriptStructure,
         empty = [s for s in result if not s.content]
         if empty and result:
             names = ", ".join(s.id for s in empty)
-            # 查看第一个空场景的原始响应帮助诊断
-            raw_preview = ""
-            for s in empty:
-                if s.raw_response:
-                    raw_preview = s.raw_response[:300]
-                    break
-            hint = f"\n原始响应预览：{raw_preview}" if raw_preview else ""
-            raise ValueError(
-                f"{len(empty)}/{len(result)} 个场景内容为空（{names}）。"
-                f"已自动重试 2 次仍失败，可能是 AI 返回了不完整的 JSON。"
-                f"建议：换用其他 AI 模型或减少场景复杂度后重试。{hint}"
-            )
+            if notify:
+                await notify(f"⚠ 跳过 {len(empty)} 个空场景（{names}）")
+            result = [s for s in result if s.content]
         return result
 
     return await _cache_or_run(cache_get, cache_put, project_id, 4, s4_hash, _run)
@@ -269,21 +260,13 @@ async def run_pipeline(project_id: str, text: str, meta: dict, config: dict,
         state.set_stage(4, StageStatus.DONE)
         state.percent = s4_base + STAGE_WEIGHTS[4]  # 95%
 
+        # 过滤空场景（已在 run_stage_4 中处理，此处做兜底）
         empty_scenes = [s for s in scenes if not s.content]
-        if empty_scenes and n_scenes > 0:
+        if empty_scenes:
             names = ", ".join(s.id for s in empty_scenes)
-            raw_preview = ""
-            for s in empty_scenes:
-                if s.raw_response:
-                    raw_preview = s.raw_response[:300]
-                    break
-            hint = f"\n原始响应预览：{raw_preview}" if raw_preview else ""
-            raise ValueError(
-                f"{len(empty_scenes)}/{n_scenes} 个场景内容为空（{names}）。"
-                f"已自动重试 2 次仍失败，可能是 AI 返回了不完整的 JSON。"
-                f"建议：换用其他 AI 模型或减少场景复杂度后重试。{hint}"
-            )
-        await notify(f"{n_scenes} 场内容生成完成")
+            await notify(f"⚠ 跳过 {len(empty_scenes)} 个空场景（{names}）")
+            scenes = [s for s in scenes if s.content]
+        await notify(f"{len(scenes)} 场内容生成完成")
 
         # Stage 5: 组装 & 校验
         state.set_stage(5, StageStatus.RUNNING)

@@ -476,14 +476,13 @@ async def run_single_stage(project_id: str, stage: int, request: Request,
                 s4 = _get_latest_cached(db, project_id, 4)
                 if s2 is None or s3 is None or s4 is None:
                     raise ValueError("请先运行 Stage 0-4")
-                empty_scenes = [s for s in s4 if not s.content]
-                if empty_scenes:
-                    names = ", ".join(s.id for s in empty_scenes)
-                    raise ValueError(
-                        f"{len(empty_scenes)}/{len(s4)} 个场景内容为空（{names}）。"
-                        f" 请清除 Stage 4 缓存后重试。"
-                    )
-                return await run_stage_5(project_id, meta, config, s2, s3, s4,
+                # 过滤空场景（兜底），正常流程在 run_stage_4 中已处理
+                s4_filtered = [s for s in s4 if s.content]
+                if len(s4_filtered) < len(s4):
+                    skipped = len(s4) - len(s4_filtered)
+                    names = ", ".join(s.id for s in s4 if not s.content)
+                    await notify(f"⚠ 跳过 {skipped} 个空场景（{names}）")
+                return await run_stage_5(project_id, meta, config, s2, s3, s4_filtered,
                                          notify, cache_get, cache_put)
 
             raise ValueError(f"未知 stage: {stage}")
