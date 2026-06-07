@@ -17,13 +17,15 @@ cp .env.example .env
 
 编辑 `.env` 文件，选择 AI 后端并填入 Key：
 
-**我该选哪个？**
+**流水线用哪个？**
 
 | 方案 | 效果 | 花费 |
 |------|------|------|
 | **Claude API**（推荐） | 最好，中文理解强 | $2-5/次 |
-| **LM Studio** | 中等，看本地模型质量 | 免费 |
 | **OpenAI GPT** | 好 | $0.5-1/次 |
+| **DeepSeek**（推荐性价比） | 好，中文优秀 | ¥0.5-1/次 |
+| **Gemini**（Google） | 好，免费额度友好 | $0-0.5/次 |
+| **LM Studio / Ollama** | 中等，看本地模型质量 | 免费 |
 
 > `.env` 里每种方案都有写好的模板，取消对应注释即可。
 
@@ -75,26 +77,53 @@ bash start.sh
 
 ## 配置参考
 
+### 流水线 AI 后端
+
 所有配置都通过环境变量，不设就用默认值：
 
 | 变量 | 默认值 | 作用 |
 |------|--------|------|
-| `SCRIPT_TOOL_AI_PROVIDER` | `claude` | 选哪个 AI：`claude` / `openai` / `local` |
-| `SCRIPT_TOOL_AI_MODEL` | `claude-sonnet-4-6` | 模型名（用 local 时改成 LM Studio 里加载的模型） |
+| `SCRIPT_TOOL_AI_PROVIDER` | `claude` | 选哪个 AI：`claude` / `openai` / `deepseek` / `gemini` / `local` |
+| `SCRIPT_TOOL_AI_MODEL` | `claude-sonnet-4-6` | 模型名 |
 | `SCRIPT_TOOL_ANTHROPIC_API_KEY` | — | Claude API Key |
 | `SCRIPT_TOOL_OPENAI_API_KEY` | — | OpenAI API Key |
+| `SCRIPT_TOOL_OPENAI_BASE_URL` | — | OpenAI 自定义 API 地址（如中转服务） |
+| `SCRIPT_TOOL_DEEPSEEK_API_KEY` | — | DeepSeek API Key |
+| `SCRIPT_TOOL_DEEPSEEK_MODEL` | `deepseek-chat` | DeepSeek 模型名 |
+| `SCRIPT_TOOL_GEMINI_API_KEY` | — | Gemini API Key |
+| `SCRIPT_TOOL_GEMINI_MODEL` | `gemini-2.5-flash` | Gemini 模型名 |
 | `SCRIPT_TOOL_LOCAL_LLM_URL` | `http://localhost:1234/v1` | 本地模型 API 地址 |
 | `SCRIPT_TOOL_LOCAL_LLM_API_KEY` | `not-needed` | 本地模型 API Key（LM Studio 不验证） |
 | `SCRIPT_TOOL_DATABASE_URL` | `sqlite:///storage/db.sqlite` | 数据库位置 |
+
+### AI 助手（右下角聊天面板）
+
+项目页面右下角的 AI 助手支持 **5 种模型** 切换，无需重启。启用方式：
+
+1. **Claude** — 设置 `SCRIPT_TOOL_ANTHROPIC_API_KEY`
+2. **GPT (OpenAI)** — 设置 `SCRIPT_TOOL_OPENAI_API_KEY`，可选设置 `SCRIPT_TOOL_OPENAI_BASE_URL` 使用中转 API
+3. **DeepSeek** — 设置 `SCRIPT_TOOL_DEEPSEEK_API_KEY`，可选设置 `SCRIPT_TOOL_DEEPSEEK_MODEL`（默认 `deepseek-chat`）
+4. **Gemini (Google)** — 设置 `SCRIPT_TOOL_GEMINI_API_KEY`，可选设置 `SCRIPT_TOOL_GEMINI_MODEL`（默认 `gemini-2.5-flash`）
+5. **本地模型** — 启动 LM Studio / Ollama，设置 `SCRIPT_TOOL_LOCAL_LLM_URL`（默认 `http://localhost:1234/v1`）
+
+> **提示**：API Key 只需配置你想用的模型对应的那个。未配置的模型在切换后会返回错误提示。
+
+### 获取 API Key
+
+| 模型 | 获取地址 | 免费额度 |
+|------|---------|---------|
+| Claude | [console.anthropic.com](https://console.anthropic.com) | 无 |
+| GPT (OpenAI) | [platform.openai.com](https://platform.openai.com) | 新用户 $5 |
+| DeepSeek | [platform.deepseek.com](https://platform.deepseek.com) | 新用户送 500 万 tokens |
+| Gemini | [aistudio.google.com](https://aistudio.google.com) | 免费额度（速率限制） |
+| 本地模型 | [lmstudio.ai](https://lmstudio.ai) / [ollama.com](https://ollama.com) | 免费 |
 
 ---
 
 ## 常见问题
 
-**Q: WSL 下启动后数据库报错 "database is locked"？**
-A: 设置数据库路径到 Windows 本机目录：
-```bash
-export SCRIPT_TOOL_DATABASE_URL="sqlite:///C:/Users/<你的用户名>/script_tool.db"
+**Q: WSL / Git Bash 下启动后数据库报错 "database is locked"？**
+A: 此问题已自动处理。`config.py` 启动时会检测运行环境，自动将数据库重定向到 Windows 本机路径（`C:/Users/<用户名>/script_tool.db`），无需手动配置。
 ```
 
 **Q: 用 LM Studio 时提示连接失败？**
