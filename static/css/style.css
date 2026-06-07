@@ -530,6 +530,19 @@ progress::-moz-progress-bar {
   font-variant-numeric: tabular-nums;
 }
 
+#pipeline-timer {
+  animation: timerPulse 2s ease-in-out infinite;
+}
+#pipeline-timer.stopped {
+  animation: none;
+  color: var(--success);
+}
+
+@keyframes timerPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+
 /* ── Drag-and-drop upload ───────────────────────────────────── */
 
 .drop-zone {
