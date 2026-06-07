@@ -21,7 +21,7 @@ class LocalLLMProvider(AIProvider):
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
         response = await self._client.chat.completions.create(
-            model=self._model, messages=messages, max_tokens=4096
+            model=self._model, messages=messages, max_tokens=16384
         )
         return response.choices[0].message.content or ""
 
@@ -31,7 +31,7 @@ class LocalLLMProvider(AIProvider):
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
         stream = await self._client.chat.completions.create(
-            model=self._model, messages=messages, max_tokens=4096, stream=True
+            model=self._model, messages=messages, max_tokens=16384, stream=True
         )
         async for chunk in stream:
             if chunk.choices[0].delta.content:
