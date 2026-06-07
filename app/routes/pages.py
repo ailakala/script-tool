@@ -76,3 +76,30 @@ async def script_view(project_id: str, request: Request, db: Session = Depends(g
         "project": project,
         **_project_nav_info(db, project_id),
     })
+
+@router.get("/projects/{project_id}/stage3/kanban", response_class=HTMLResponse)
+async def stage3_kanban(project_id: str, request: Request, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return request.app.state.templates.TemplateResponse("404.html", {
+            "request": request, "message": "项目不存在"
+        }, status_code=404)
+    return request.app.state.templates.TemplateResponse("stage3_kanban.html", {
+        "request": request,
+        "project": project,
+        **_project_nav_info(db, project_id),
+    })
+
+
+@router.get("/projects/{project_id}/characters", response_class=HTMLResponse)
+async def character_graph(project_id: str, request: Request, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return request.app.state.templates.TemplateResponse("404.html", {
+            "request": request, "message": "项目不存在"
+        }, status_code=404)
+    return request.app.state.templates.TemplateResponse("character_graph.html", {
+        "request": request,
+        "project": project,
+        **_project_nav_info(db, project_id),
+    })

@@ -2,7 +2,6 @@
 PDF 导出：标准剧本排版
 - font: Courier 12pt (English) + SimSun fallback (Chinese)
 - margins: Left 1.5" Right 1.0" Top 1.0" Bottom 1.0"
-- character cue centred, dialogue indented, parenthetical indented
 - A4 paper, 12pt leading
 """
 
@@ -17,7 +16,6 @@ def _resolve_font(name: str) -> Path:
     if _sys.platform == "win32":
         fonts_dir = Path("C:/Windows/Fonts")
     else:
-        # Linux / WSL native fallback
         for candidate in ("/usr/share/fonts", "/usr/local/share/fonts"):
             p = Path(candidate)
             if p.exists():
@@ -62,8 +60,6 @@ class ScreenplayPDF(FPDF):
         self._y = 0.0            # current y in mm
         self.set_auto_page_break(True, MARGIN_BOTTOM * 25.4 / 72)
 
-        # Courier is a core font in fpdf2 — no registration needed
-        # Register SimSun for CJK text (fpdf2 with uni=True handles TTC files)
         if SIMSUN_TTC.exists():
             self.add_font("SimSun", "", str(SIMSUN_TTC), uni=True)
 
@@ -109,10 +105,11 @@ class ScreenplayPDF(FPDF):
         """Render a character name above dialogue."""
         self._new_page_if_needed(LEADING * 2)
         self.set_font(self._font_name, "", FONT_SIZE)
-        # Character name centred at CHAR_CUE_X
         x = self._x_from_left(CHAR_CUE_X)
         self.set_x(x)
-        self.cell(self._mm(30), self._mm(LEADING), name.strip().upper())
+        # BUGFIX: new_y="NEXT" ensures dialogue starts on the next line below the character name
+        self.cell(self._mm(30), self._mm(LEADING), name.strip().upper(),
+                  new_x="LMARGIN", new_y="NEXT")
 
     def dialogue(self, text: str):
         """Render dialogue text (indented block)."""
@@ -134,7 +131,6 @@ class ScreenplayPDF(FPDF):
         """Render a scene heading (slug line) in bold."""
         self._new_page_if_needed(LEADING * 2)
         self.set_font(self._font_name, "", FONT_SIZE)
-        # Bold styling via font weight
         x = self._x_from_left(MARGIN_LEFT)
         w = self.w - x - self._mm(MARGIN_RIGHT)
         self.set_x(x)
@@ -144,7 +140,6 @@ class ScreenplayPDF(FPDF):
         """Render a transition (e.g. CUT TO:)."""
         self._new_page_if_needed(LEADING * 2)
         self.set_font(self._font_name, "", FONT_SIZE)
-        # Transitions are right-aligned
         x = self._x_from_left(MARGIN_LEFT)
         w = self.w - x - self._mm(MARGIN_RIGHT)
         self.set_x(x)
@@ -172,12 +167,16 @@ def generate_screenplay_pdf(yaml_data: dict, title: str = "Screenplay") -> bytes
     Returns PDF bytes.
     """
     pdf = ScreenplayPDF(title=title)
-    pdf.set_margin(MARGIN_TOP * 25.4 / 72)  # set top margin
+    pdf.set_margin(MARGIN_TOP * 25.4 / 72)
     pdf.add_page()
 
     # ── Title header ────────────────────────────────────────
+    # Left-aligned: use set_x to position at left margin, then cell with explicit width
     pdf.set_font(pdf._font_name, "", 16)
-    pdf.cell(0, 10, title, align="C", new_x="LMARGIN", new_y="NEXT")
+    x_title = pdf._x_from_left(MARGIN_LEFT)
+    pdf.set_x(x_title)
+    w_title = pdf.w - x_title - pdf._mm(MARGIN_RIGHT)
+    pdf.cell(w_title, 10, title, align="L", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(5)
 
     # ── Meta info ───────────────────────────────────────────
@@ -194,7 +193,10 @@ def generate_screenplay_pdf(yaml_data: dict, title: str = "Screenplay") -> bytes
         if meta.get("version"):
             info_parts.append(f"版本: {meta['version']}")
         info_line = " | ".join(info_parts)
-        pdf.cell(0, 6, info_line, align="C", new_x="LMARGIN", new_y="NEXT")
+        x_meta = pdf._x_from_left(MARGIN_LEFT)
+        pdf.set_x(x_meta)
+        w_meta = pdf.w - x_meta - pdf._mm(MARGIN_RIGHT)
+        pdf.cell(w_meta, 6, info_line, align="L", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(3)
 
     # Divider
@@ -216,9 +218,9 @@ def generate_screenplay_pdf(yaml_data: dict, title: str = "Screenplay") -> bytes
             role = ch.get("role", "")
             pdf.set_font(pdf._font_name, "", 10)
             if role:
-                pdf.cell(0, 6, f"  {name}  ({role})  {desc}", new_x="LMARGIN", new_y="NEXT")
+                pdf.cell(0, 6, f"  {name}  ({role})  {desc}", align="L", new_x="LMARGIN", new_y="NEXT")
             else:
-                pdf.cell(0, 6, f"  {name}  {desc}", new_x="LMARGIN", new_y="NEXT")
+                pdf.cell(0, 6, f"  {name}  {desc}", align="L", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(5)
         # Divider
         y = pdf.get_y()
@@ -286,6 +288,9 @@ def generate_screenplay_pdf(yaml_data: dict, title: str = "Screenplay") -> bytes
     # ── Fin ─────────────────────────────────────────────────
     pdf.blank_line()
     pdf.set_font(pdf._font_name, "", 12)
-    pdf.cell(0, 10, "— END —", align="C")
+    x_end = pdf._x_from_left(MARGIN_LEFT)
+    pdf.set_x(x_end)
+    w_end = pdf.w - x_end - pdf._mm(MARGIN_RIGHT)
+    pdf.cell(w_end, 10, "— END —", align="L", new_x="LMARGIN", new_y="NEXT")
 
     return pdf.output()
