@@ -4,52 +4,317 @@
 <h1>{{ project.title }}</h1>
 <div class="workspace">
     <div class="panel" id="upload-panel">
-        <h2>1. 导入小说</h2>
-        <form hx-encoding="multipart/form-data" hx-post="/api/projects/{{ project.id }}/upload" hx-target="#upload-result">
-            <input type="file" name="file" accept=".txt,.docx,.md">
-            <button type="submit">上传文件</button>
+        <h2>📂 导入小说</h2>
+        <form hx-encoding="multipart/form-data" hx-post="/api/projects/{{ project.id }}/upload" hx-target="#upload-result" hx-trigger="change from:#file-input" id="upload-form">
+            <div class="drop-zone" id="drop-zone">
+                <div class="drop-zone-icon">📂</div>
+                <div class="drop-zone-text">拖拽文件到此处上传</div>
+                <div class="drop-zone-hint">或点击下方按钮选择文件（支持 .txt / .docx / .md）</div>
+            </div>
+            <div class="file-input-wrapper" style="margin-bottom:0.75em">
+                <input type="file" name="file" id="file-input" accept=".txt,.docx,.md" style="display:none">
+                <button type="button" class="file-select-btn" onclick="document.getElementById('file-input').click()">📁 选择文件</button>
+                <span id="file-name" class="file-name-text">未选择任何文件</span>
+            </div>
         </form>
         <hr>
-        <textarea name="text" placeholder="或直接粘贴小说文本..." rows="10" style="width:100%"></textarea>
-        <button hx-post="/api/projects/{{ project.id }}/paste" hx-include="previous textarea" hx-target="#upload-result">解析文本</button>
+        <textarea name="text" id="paste-text" placeholder="或直接粘贴小说文本..." rows="8" style="width:100%"></textarea>
+        <button hx-post="/api/projects/{{ project.id }}/paste" hx-include="#paste-text" hx-target="#upload-result" style="margin-top:0.5em">🔍 解析文本</button>
         <div id="upload-result"></div>
     </div>
 
     <div class="panel" id="pipeline-panel">
-        <h2>2. 生成剧本</h2>
-        <div style="display:flex;gap:0.5em;margin-bottom:1em">
-            <button id="run-btn" onclick="runPipeline()">一键生成</button>
-            <button id="step-btn" onclick="runStepByStep()">分步生成</button>
+        <h2>⚡ 生成剧本</h2>
+        <div style="display:flex;gap:0.5em;margin-bottom:0.75em">
+            <button id="run-btn" onclick="runPipeline()">🚀 一键生成</button>
+            <button id="step-btn" onclick="runStepByStep()" class="btn-secondary">📋 分步生成</button>
+            <button id="restart-btn" onclick="restartPipeline()" class="btn-secondary" style="display:none">🔄 重新开始</button>
+        </div>
+        <div id="resume-bar" style="display:none;padding:0.75em 1em;margin-bottom:0.75em;background:rgba(34,211,238,0.1);border:1px solid rgba(34,211,238,0.25);border-radius:8px;align-items:center;justify-content:space-between">
+            <span style="color:#67e8f9;font-size:0.95em">检测到已完成 <strong id="resume-stage-label">Stage 0-2</strong>，可继续生成</span>
+            <div style="display:flex;gap:0.5em">
+                <button id="resume-btn" onclick="resumePipeline()" style="background:#06b6d4;color:#fff;border:none;padding:0.4em 1em;border-radius:6px;cursor:pointer;font-size:0.9em">▶ 继续生成</button>
+                <button onclick="restartPipeline()" style="background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3);padding:0.4em 1em;border-radius:6px;cursor:pointer;font-size:0.9em">🔄 重新开始</button>
+            </div>
+        </div>
+        <div id="progress-bar-container" style="margin-bottom:0.75em;display:none">
+            <div style="display:flex;align-items:center;gap:0.75em">
+                <progress id="progress-bar" value="0" max="100" style="flex:1"></progress>
+                <span id="progress-percent">0%</span>
+                <span id="pipeline-timer" style="display:none;font-variant-numeric:tabular-nums;color:var(--accent-3);font-weight:700;font-size:0.9em;white-space:nowrap">⏱ 00:00</span>
+            </div>
+        </div>
+        <div id="completion-toast">
+            <div style="display:flex;align-items:center;gap:0.75em">
+                <span style="font-size:2em">🎉</span>
+                <div>
+                    <strong style="font-size:1.1em;color:var(--fg-primary)">剧本生成完成！</strong>
+                    <p style="margin:0.25em 0 0;color:var(--fg-secondary);font-size:0.9em">全部 6 个阶段已处理完毕 · 耗时 <span id="completion-time" style="color:var(--accent-3);font-weight:700">--</span></p>
+                    <div id="completion-warnings" style="display:none;margin-top:0.5em;padding:0.5em 0.75em;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:6px;font-size:0.8em;color:#fbbf24;max-height:120px;overflow-y:auto"></div>
+                </div>
+                <button onclick="closeCompletionToast()" class="btn-ghost" style="margin-left:0.5em">✕</button>
+            </div>
         </div>
         <div id="progress">
-            <div id="stage-0" class="stage">Stage 0: 文本预处理</div>
-            <div id="stage-1" class="stage">Stage 1: 分章节分析</div>
-            <div id="stage-2" class="stage">Stage 2: 跨章节综合</div>
-            <div id="stage-3" class="stage">Stage 3: 剧本结构设计</div>
-            <div id="stage-4" class="stage">Stage 4: 逐场内容生成</div>
-            <div id="stage-5" class="stage">Stage 5: 组装 & 校验</div>
+            <div id="stage-0" class="stage">文本预处理</div>
+            <div id="stage-1" class="stage">分章节分析</div>
+            <div id="stage-2" class="stage">跨章节综合</div>
+            <div id="stage-3" class="stage">剧本结构设计 <a href="/projects/{{ project.id }}/stage3/kanban" class="stage-kanban-link" id="stage3-kanban-link" style="display:none">📋 编排场景</a></div>
+            <div id="stage-4" class="stage">逐场内容生成</div>
+            <div id="stage-5" class="stage">组装 & 校验</div>
         </div>
     </div>
 
     <div class="panel" id="review-panel" style="display:none">
-        <h2>审查中间结果</h2>
+        <h2>🔍 审查中间结果</h2>
         <div id="review-content"></div>
-        <div style="margin-top:1em">
-            <button id="continue-btn" onclick="continuePipeline()" style="display:none">继续下一阶段</button>
-            <button id="skip-review-btn" onclick="skipToEnd()" style="display:none">跳过审查，直接完成</button>
+        <div class="mt-2 flex gap-1">
+            <button id="kanban-btn" onclick="openKanban()" style="display:none;background:linear-gradient(135deg,#8b5cf6,#6366f1)">📋 场景编排看板</button>
+            <button id="continue-btn" onclick="continuePipeline()" style="display:none">▶ 继续下一阶段</button>
+            <button id="skip-review-btn" onclick="skipToEnd()" class="btn-secondary" style="display:none">⏭ 跳过审查</button>
         </div>
     </div>
 
     <div class="panel" id="result-panel">
-        <h2>3. 查看结果</h2>
-        <a href="/projects/{{ project.id }}/script">查看/编辑剧本</a>
-        <button onclick="downloadYAML()" style="margin-left:1em">下载 YAML</button>
+        <h2>📄 查看结果</h2>
+        <div class="flex gap-1" style="flex-wrap:wrap">
+            <a href="/projects/{{ project.id }}/script" class="btn" style="display:inline-flex;text-decoration:none">📝 查看/编辑剧本</a>
+            <button onclick="downloadPDF()" class="btn-secondary">⬇ 下载 PDF</button>
+            <button onclick="downloadYAML()" class="btn-secondary">⬇ 下载 YAML</button>
+        </div>
+    </div>
+</div>
+
+<!-- AI Chat Panel -->
+<div class="chat-panel collapsed" id="chat-panel">
+    <div class="chat-header" onclick="toggleChat()">
+        <div class="chat-header-left">
+            <span>💬 AI 助手</span>
+            <span class="chat-toggle">▼</span>
+        </div>
+    </div>
+    <div class="chat-body">
+        <div class="chat-actions" id="chat-actions">
+            <button class="chat-action-btn" onclick="quickAction('请将以下内容翻译成英文：')">中译英</button>
+            <button class="chat-action-btn" onclick="quickAction('请将以下内容翻译成中文：')">英译中</button>
+            <button class="chat-action-btn" onclick="quickAction('请润色以下文本，使其表达更流畅：')">润色</button>
+            <button class="chat-action-btn" onclick="quickAction('请用简洁的语言总结以下内容：')">摘要</button>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+            <div class="chat-msg assistant">你好！我是 AI 助手，可以帮你翻译、润色剧本内容。有什么需要？</div>
+        </div>
+        <div class="chat-options">
+            <label>模型:
+                <select id="chat-model">
+                    <option value="claude">Claude</option>
+                    <option value="openai">GPT (OpenAI)</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="gemini">Gemini (Google)</option>
+                    <option value="local">本地模型</option>
+                </select>
+            </label>
+        </div>
+        <div class="chat-input-row">
+            <textarea id="chat-input" rows="2" placeholder="输入消息… (Shift+Enter 换行，Enter 发送)"
+                onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
+            <button class="chat-send-btn" onclick="sendMessage()">发送</button>
+        </div>
     </div>
 </div>
 
 <script>
 let _nextStage = 1;
 let _stepMode = false;
+let _timerStart = null;
+let _timerInterval = null;
+
+function formatElapsed(ms) {
+    var total = Math.floor(ms / 1000);
+    var h = Math.floor(total / 3600);
+    var m = Math.floor((total % 3600) / 60);
+    var s = total % 60;
+    if (h > 0) {
+        return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    }
+    return String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+}
+
+function startTimer() {
+    _timerStart = Date.now();
+    var el = document.getElementById('pipeline-timer');
+    if (el) {
+        el.style.display = 'inline';
+        el.classList.remove('stopped');
+        el.textContent = '⏱ 00:00';
+    }
+    if (_timerInterval) clearInterval(_timerInterval);
+    _timerInterval = setInterval(function() {
+        if (_timerStart) {
+            var el2 = document.getElementById('pipeline-timer');
+            if (el2) el2.textContent = '⏱ ' + formatElapsed(Date.now() - _timerStart);
+        }
+    }, 1000);
+}
+
+function stopTimer() {
+    if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+    var elapsed = _timerStart ? Date.now() - _timerStart : 0;
+    _timerStart = null;
+    var el = document.getElementById('pipeline-timer');
+    if (el) {
+        el.textContent = '⏱ ' + formatElapsed(elapsed);
+        el.classList.add('stopped');
+    }
+    // Update completion toast
+    var ct = document.getElementById('completion-time');
+    if (ct) ct.textContent = formatElapsed(elapsed);
+    return elapsed;
+}
+
+document.addEventListener('DOMContentLoaded', async function() {
+    try {
+        const res = await fetch('/api/projects/{{ project.id }}/text');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.text) {
+                const textarea = document.querySelector('textarea[name="text"]');
+                if (textarea) textarea.value = data.text;
+            }
+        }
+    } catch(e) { /* ignore */ }
+
+    // Check pipeline status
+    try {
+        const statusRes = await fetch('/api/projects/{{ project.id }}/pipeline-status');
+        if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            let maxDone = -1;
+            for (let s = 0; s <= 5; s++) {
+                if (statusData.stages && statusData.stages[String(s)] === 'cached') {
+                    updateStage(s, 'done', '');
+                    maxDone = Math.max(maxDone, s);
+                    if (s === 3) {
+                        var link = document.getElementById('stage3-kanban-link');
+                        if (link) link.style.display = 'inline';
+                    }
+                }
+            }
+            if (maxDone >= 0) {
+                updateProgress(Math.min((maxDone + 1) * 100 / 6, 100));
+            }
+            if (statusData.is_complete) {
+                showResumeBar(null);
+                document.getElementById('restart-btn').style.display = 'inline-flex';
+                try {
+                    const r5 = await fetch('/api/projects/{{ project.id }}/stage/5');
+                    if (r5.ok) {
+                        const d5 = await r5.json();
+                        if (d5.data) showResult(d5.data.screenplay_text || d5.data.yaml_text || '');
+                    }
+                } catch(e) {}
+            } else if (maxDone >= 0) {
+                showResumeBar(maxDone);
+                document.getElementById('restart-btn').style.display = 'inline-flex';
+            }
+            if (statusData.last_error) {
+                updateStage(maxDone + 1, 'error', statusData.last_error);
+            }
+        }
+    } catch(e) { /* ignore */ }
+
+    // Auto-run from kanban return
+    {var urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('auto_stage') === '4') {
+        window.history.replaceState({}, '', '/projects/{{ project.id }}');
+        if (maxDone >= 3) {
+            _stepMode = false;
+            setButtons(true);
+            _nextStage = 4;
+            startTimer();
+            runNextStage();
+        }
+    }}
+});
+
+function showResumeBar(maxDone) {
+    var bar = document.getElementById('resume-bar');
+    if (!bar) return;
+    if (maxDone === null || maxDone === undefined) {
+        bar.style.display = 'none';
+        return;
+    }
+    var label = document.getElementById('resume-stage-label');
+    var stageNames = ['文本预处理', '分章节分析', '跨章节综合', '剧本结构设计', '逐场内容生成', '组装校验'];
+    if (label) {
+        label.textContent = 'Stage 0-' + maxDone + '（' + stageNames.slice(0, maxDone+1).join(' → ') + '）';
+    }
+    bar.style.display = 'flex';
+}
+
+function hideResumeBar() {
+    var bar = document.getElementById('resume-bar');
+    if (bar) bar.style.display = 'none';
+}
+
+async function resumePipeline() {
+    hideResumeBar();
+    document.getElementById('restart-btn').style.display = 'none';
+    // Full pipeline mode skips cached stages automatically
+    await runPipeline();
+}
+
+async function restartPipeline() {
+    if (!confirm('重新开始将清除所有已生成的缓存数据，确定要重新开始吗？')) return;
+    hideResumeBar();
+    document.getElementById('restart-btn').style.display = 'none';
+    // Clear all caches
+    try {
+        await fetch('/api/projects/{{ project.id }}/clear-cache', { method: 'POST' });
+    } catch(e) {}
+    // Reset UI
+    for (var s = 0; s <= 5; s++) {
+        updateStage(s, '', '');
+    }
+    updateProgress(0);
+    document.getElementById('progress-bar-container').style.display = 'none';
+    document.getElementById('result-panel').querySelectorAll('pre').forEach(function(el) { el.remove(); });
+    // Start fresh
+    await runPipeline();
+}
+
+// Drag-and-drop upload
+(function() {
+    var dropZone = document.getElementById('drop-zone');
+    var fileInput = document.getElementById('file-input');
+    if (!dropZone || !fileInput) return;
+
+    ['dragenter', 'dragover'].forEach(function(evt) {
+        dropZone.addEventListener(evt, function(e) {
+            e.preventDefault(); e.stopPropagation();
+            dropZone.classList.add('dragover');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach(function(evt) {
+        dropZone.addEventListener(evt, function(e) {
+            e.preventDefault(); e.stopPropagation();
+            dropZone.classList.remove('dragover');
+        });
+    });
+
+    dropZone.addEventListener('drop', function(e) {
+        var files = e.dataTransfer.files;
+        if (files.length > 0) {
+            fileInput.files = files;
+            fileInput.dispatchEvent(new Event('change'));
+        }
+    });
+})();
+
+document.getElementById('file-input').addEventListener('change', function() {
+    var name = this.files[0] ? this.files[0].name : '未选择任何文件';
+    document.getElementById('file-name').textContent = name;
+});
 
 function getText() {
     const textarea = document.querySelector('textarea[name="text"]');
@@ -64,8 +329,35 @@ function setButtons(disabled) {
 function updateStage(stage, status, message) {
     const el = document.getElementById('stage-' + stage);
     if (el) {
-        if (message) el.textContent = 'Stage ' + stage + ': ' + message;
+        if (message) {
+            // Preserve the kanban link for Stage 3
+            var link = el.querySelector('.stage-kanban-link');
+            el.textContent = message;
+            if (link) el.appendChild(link);
+        }
         el.className = 'stage ' + status;
+        // Show kanban link when Stage 3 becomes done
+        if (stage === 3 && status === 'done') {
+            var kanbanLink = document.getElementById('stage3-kanban-link');
+            if (kanbanLink) kanbanLink.style.display = 'inline';
+        }
+    }
+}
+
+function updateProgress(percent) {
+    const bar = document.getElementById('progress-bar');
+    const pct = document.getElementById('progress-percent');
+    const container = document.getElementById('progress-bar-container');
+    if (container) container.style.display = 'block';
+    if (bar) bar.value = percent;
+    if (pct) pct.textContent = percent + '%';
+}
+
+function updateTimer(elapsed) {
+    const timer = document.getElementById('pipeline-timer');
+    if (timer && elapsed !== undefined) {
+        timer.style.display = 'inline';
+        timer.textContent = '⏱ ' + formatElapsed(elapsed * 1000);
     }
 }
 
@@ -94,41 +386,54 @@ async function streamSSE(url, onMessage) {
     return true;
 }
 
-// ── One-click mode ──────────────────────────────────────────────────
-
 async function runPipeline() {
     setButtons(true);
+    hideResumeBar();
+    document.getElementById('restart-btn').style.display = 'none';
     document.getElementById('review-panel').style.display = 'none';
+    startTimer();
 
     const ok = await streamSSE('/api/projects/{{ project.id }}/run', function(msg) {
+        if (msg.percent !== undefined) updateProgress(msg.percent);
+        if (msg.elapsed !== undefined) updateTimer(msg.elapsed);
         if (msg.message && msg.current_stage !== undefined) {
             updateStage(msg.current_stage, msg.stage_status[msg.current_stage], msg.message);
         }
         if (msg.status === 'complete') {
+            updateProgress(100);
+            stopTimer();
             if (msg.errors && msg.errors.length > 0) {
-                alert('完成，但有错误:\n' + msg.errors.join('\n'));
+                var warnDiv = document.getElementById('completion-warnings');
+                if (warnDiv) {
+                    warnDiv.style.display = 'block';
+                    warnDiv.innerHTML = msg.errors.map(function(e) { return '⚠ ' + e; }).join('<br>');
+                }
             }
-            if (msg.yaml_text) {
-                showYAML(msg.yaml_text);
+            showCompletionToast();
+            if (msg.screenplay_text || msg.yaml_text) {
+                showResult(msg.screenplay_text || msg.yaml_text);
             }
+            document.getElementById('restart-btn').style.display = 'inline-flex';
         }
     });
 
     setButtons(false);
 }
 
-// ── Step-by-step mode ───────────────────────────────────────────────
-
 async function runStepByStep() {
     setButtons(true);
+    hideResumeBar();
+    document.getElementById('restart-btn').style.display = 'none';
     _stepMode = true;
     _nextStage = 0;
     document.getElementById('review-panel').style.display = 'none';
+    startTimer();
     await runNextStage();
 }
 
 async function continuePipeline() {
     document.getElementById('continue-btn').style.display = 'none';
+    document.getElementById('kanban-btn').style.display = 'none';
     document.getElementById('skip-review-btn').style.display = 'none';
     await runNextStage();
 }
@@ -138,7 +443,6 @@ async function skipToEnd() {
     document.getElementById('continue-btn').style.display = 'none';
     document.getElementById('skip-review-btn').style.display = 'none';
     document.getElementById('review-panel').style.display = 'none';
-    // Use one-shot mode — cached stages will be skipped
     setButtons(false);
     runPipeline();
 }
@@ -150,31 +454,35 @@ async function runNextStage() {
     reviewPanel.style.display = 'none';
 
     const ok = await streamSSE('/api/projects/{{ project.id }}/run-stage/' + stage, function(msg) {
+        if (msg.percent !== undefined) updateProgress(msg.percent);
+        if (msg.elapsed !== undefined) updateTimer(msg.elapsed);
         if (msg.message) {
             updateStage(stage, 'running', msg.message);
         }
         if (msg.status === 'complete') {
             updateStage(stage, 'done', '');
+            updateProgress(msg.percent || ((stage + 1) * 100 / 6));
             _nextStage = stage + 1;
 
             if (_stepMode && (stage === 1 || stage === 2 || stage === 3)) {
-                // Pause for review
                 reviewPanel.style.display = 'block';
-                document.getElementById('continue-btn').style.display = 'inline-block';
-                document.getElementById('skip-review-btn').style.display = 'inline-block';
+                document.getElementById('continue-btn').style.display = 'inline-flex';
+                document.getElementById('skip-review-btn').style.display = 'inline-flex';
+                if (stage === 3) {
+                    document.getElementById('kanban-btn').style.display = 'inline-flex';
+                }
                 document.getElementById('review-content').innerHTML =
-                    '<div hx-get="/api/projects/{{ project.id }}/stage/' + stage + '" hx-trigger="load">加载中间结果…</div>';
+                    '<div hx-get="/api/projects/{{ project.id }}/stage/' + stage + '" hx-trigger="load">Loading...</div>';
             } else if (_nextStage <= 5) {
-                // Auto-continue
                 runNextStage();
             } else {
-                // Done
+                stopTimer();
                 setButtons(false);
                 reviewPanel.style.display = 'none';
-                // Load YAML into result panel
+                showCompletionToast();
                 fetch('/api/projects/{{ project.id }}/stage/5')
                     .then(r => r.json())
-                    .then(d => { if (d.data && d.data.yaml_text) showYAML(d.data.yaml_text); });
+                    .then(d => { if (d.data) showResult(d.data.screenplay_text || d.data.yaml_text || ''); });
             }
         }
         if (msg.status === 'error') {
@@ -189,19 +497,139 @@ async function runNextStage() {
     }
 }
 
-function showYAML(yamlText) {
+function showCompletionToast() {
+    const toast = document.getElementById('completion-toast');
+    if (toast) {
+        toast.style.display = 'block';
+        setTimeout(function() {
+            toast.style.transition = 'opacity 0.3s';
+            toast.style.opacity = '0';
+            setTimeout(function() { toast.style.display = 'none'; toast.style.opacity = '1'; }, 300);
+        }, 3000);
+    }
+}
+
+function closeCompletionToast() {
+    const toast = document.getElementById('completion-toast');
+    if (toast) {
+        toast.style.display = 'none';
+    }
+}
+
+function showResult(text) {
     const panel = document.getElementById('result-panel');
-    const existing = document.getElementById('yaml-preview');
+    const existing = document.getElementById('script-preview');
     if (existing) existing.remove();
     const pre = document.createElement('pre');
-    pre.id = 'yaml-preview';
-    pre.style.cssText = 'max-height:400px;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:1em;border-radius:4px;margin-top:0.5em;';
-    pre.textContent = yamlText.substring(0, 3000);
+    pre.id = 'script-preview';
+    pre.textContent = text.substring(0, 5000);
     panel.appendChild(pre);
+}
+
+function downloadPDF() {
+    window.open('/api/projects/{{ project.id }}/script.pdf', '_blank');
 }
 
 function downloadYAML() {
     window.open('/api/projects/{{ project.id }}/script.yaml', '_blank');
+}
+
+function openKanban() {
+    window.location.href = '/projects/{{ project.id }}/stage3/kanban';
+}
+
+// AI Chat
+var _chatStreaming = false;
+
+function toggleChat() {
+    var panel = document.getElementById('chat-panel');
+    panel.classList.toggle('collapsed');
+    panel.classList.toggle('expanded');
+}
+
+function quickAction(prompt) {
+    var input = document.getElementById('chat-input');
+    input.value = prompt;
+    input.focus();
+    var panel = document.getElementById('chat-panel');
+    if (panel.classList.contains('collapsed')) {
+        toggleChat();
+    }
+}
+
+async function sendMessage() {
+    if (_chatStreaming) return;
+    var input = document.getElementById('chat-input');
+    var text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+
+    appendMsg('user', text);
+
+    _chatStreaming = true;
+    var assistantDiv = appendMsg('assistant', '');
+    var model = document.getElementById('chat-model').value;
+
+    try {
+        var res = await fetch('/api/projects/{{ project.id }}/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({message: text, model: model}),
+        });
+        if (!res.ok) {
+            var errText = 'HTTP ' + res.status;
+            try { var errJson = await res.json(); errText = errJson.detail || errText; } catch(e) {}
+            assistantDiv.textContent = '❌ ' + errText + '（请检查该模型的 API Key 是否在 .env 中配置）';
+            _chatStreaming = false;
+            return;
+        }
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+        var fullText = '';
+        var hasError = false;
+        while (true) {
+            var r = await reader.read();
+            if (r.done) break;
+            buffer += decoder.decode(r.value, {stream: true});
+            var lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i];
+                if (line.startsWith('data: ')) {
+                    var msg = JSON.parse(line.slice(6));
+                    if (msg.delta) {
+                        fullText += msg.delta;
+                        assistantDiv.textContent = fullText;
+                        scrollChat();
+                    }
+                    if (msg.error) {
+                        hasError = true;
+                        assistantDiv.textContent = '❌ ' + msg.error;
+                    }
+                }
+            }
+        }
+        if (!fullText && !hasError) assistantDiv.textContent = '(no response)';
+    } catch (e) {
+        assistantDiv.textContent = 'Request failed: ' + e.message;
+    }
+    _chatStreaming = false;
+}
+
+function appendMsg(role, text) {
+    var messages = document.getElementById('chat-messages');
+    var div = document.createElement('div');
+    div.className = 'chat-msg ' + role;
+    div.textContent = text;
+    messages.appendChild(div);
+    scrollChat();
+    return div;
+}
+
+function scrollChat() {
+    var messages = document.getElementById('chat-messages');
+    messages.scrollTop = messages.scrollHeight;
 }
 </script>
 {% endblock %}

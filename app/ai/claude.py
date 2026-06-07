@@ -17,7 +17,7 @@ class ClaudeProvider(AIProvider):
     async def generate(self, prompt: str, system: str = "",
                        output_format: str = "json") -> str:
         messages = [{"role": "user", "content": prompt}]
-        kwargs = {"model": self._model, "max_tokens": 4096, "messages": messages}
+        kwargs = {"model": self._model, "max_tokens": 8192, "messages": messages}
         if system:
             kwargs["system"] = system
         response = await self._client.messages.create(**kwargs)
@@ -27,7 +27,7 @@ class ClaudeProvider(AIProvider):
 
     async def generate_stream(self, prompt: str, system: str = "") -> AsyncIterator[str]:
         messages = [{"role": "user", "content": prompt}]
-        kwargs = {"model": self._model, "max_tokens": 4096, "messages": messages}
+        kwargs = {"model": self._model, "max_tokens": 8192, "messages": messages}
         if system:
             kwargs["system"] = system
         async with self._client.messages.stream(**kwargs) as stream:
